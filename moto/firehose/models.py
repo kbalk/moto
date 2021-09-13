@@ -16,6 +16,7 @@ from base64 import b64decode
 from datetime import datetime
 from time import time
 from uuid import uuid4
+import warnings
 
 import requests
 
@@ -208,7 +209,7 @@ class FirehoseBackend(BaseBackend):
 
         # Rule out situations that are not yet implemented.
         if delivery_stream_encryption_configuration_input:
-            raise NotImplementedError(
+            warnings.warn(
                 "A delivery stream with server-side encryption enabled is not "
                 "yet implemented"
             )
@@ -265,12 +266,6 @@ class FirehoseBackend(BaseBackend):
 
         self.tagger.delete_all_tags_for_resource(delivery_stream.delivery_stream_arn)
 
-        # The following logic is not applicable for moto as far as I can tell.
-        # if delivery_stream.delivery_stream_status == "CREATING":
-        #     raise ResourceInUseException(
-        #         f"The hose {delivery_stream_name} is currently being deleted.
-        #         f"Please retry after some time"
-        #     )
         delivery_stream.delivery_stream_status = "DELETING"
         self.delivery_streams.pop(delivery_stream_name)
 

@@ -1,4 +1,7 @@
 """Unit tests specific to basic Firehose Delivery Stream-related APIs."""
+from unittest import SkipTest
+import warnings
+
 import boto3
 from botocore.exceptions import ClientError
 import pytest
@@ -7,7 +10,7 @@ from moto import mock_firehose
 from moto import settings
 from moto.core import ACCOUNT_ID
 from moto.core.utils import get_random_hex
-from moto.firehose.models import DeliveryStream, firehose_backends
+from moto.firehose.models import DeliveryStream
 
 TEST_REGION = "us-east-1" if settings.TEST_SERVER_MODE else "us-west-2"
 
@@ -21,12 +24,75 @@ def sample_s3_dest_config():
 
 
 @mock_firehose
+def test_warnings():
+    """Test features that raise a warning as they're unimplemented."""
+    if settings.TEST_SERVER_MODE:
+        raise SkipTest("Can't capture warnings in server mode")
+
+    client = boto3.client("firehose", region_name=TEST_REGION)
+    s3_dest_config = sample_s3_dest_config()
+    stream_name = f"test_warning_{get_random_hex(6)}"
+
+    # DeliveryStreamEncryption is not supported.
+    with warnings.catch_warnings(record=True) as warn_msg:
+        client.create_delivery_stream(
+            DeliveryStreamName=stream_name,
+            ExtendedS3DestinationConfiguration=s3_dest_config,
+            DeliveryStreamEncryptionConfigurationInput={"KeyType": "AWS_OWNED_CMK"},
+        )
+    assert "server-side encryption enabled is not yet implemented" in str(
+        warn_msg[-1].message
+    )
+
+
+@mock_firehose
+def test_unimplemented_features():
+    """Test features that raise an exception as they're unimplemented."""
+    if settings.TEST_SERVER_MODE:
+        raise SkipTest("Can't capture non-client exceptions in server mode")
+
+    client = boto3.client("firehose", region_name=TEST_REGION)
+    s3_dest_config = sample_s3_dest_config()
+    stream_name = f"test_unimplemented_{get_random_hex(6)}"
+
+    # Can't create a delivery stream for Splunk as it's unimplemented.
+    with pytest.raises(NotImplementedError):
+        client.create_delivery_stream(
+            DeliveryStreamName=stream_name,
+            SplunkDestinationConfiguration={
+                "HECEndpoint": "foo",
+                "HECEndpointType": "foo",
+                "HECToken": "foo",
+                "S3Configuration": {"RoleARN": "foo", "BucketARN": "foo"},
+            },
+        )
+
+    # Can't update a delivery stream to Splunk as it's unimplemented.
+    client.create_delivery_stream(
+        DeliveryStreamName=stream_name, S3DestinationConfiguration=s3_dest_config,
+    )
+
+    with pytest.raises(NotImplementedError):
+        client.update_destination(
+            DeliveryStreamName=stream_name,
+            CurrentDeliveryStreamVersionId="1",
+            DestinationId="destinationId-000000000001",
+            SplunkDestinationUpdate={
+                "HECEndpoint": "foo",
+                "HECEndpointType": "foo",
+                "HECToken": "foo",
+            },
+        )
+
+
+@mock_firehose
 def test_create_delivery_stream_failures():
     """Test errors invoking create_delivery_stream()."""
     client = boto3.client("firehose", region_name=TEST_REGION)
     s3_dest_config = sample_s3_dest_config()
     failure_name = f"test_failure_{get_random_hex(6)}"
 
+    # Create too many streams.
     for idx in range(DeliveryStream.MAX_STREAMS_PER_REGION):
         client.create_delivery_stream(
             DeliveryStreamName=f"{failure_name}_{idx}",
@@ -430,19 +496,3 @@ def test_update_destination():
         "Changing the destination type to or from HttpEndpoint is not "
         "supported at this time"
     ) in err["Message"]
-
-
-@mock_firehose
-def test_lookup_name_from_arn():
-    """Test delivery stream instance can be retrieved given ARN."""
-    client = boto3.client("firehose", region_name=TEST_REGION)
-    s3_dest_config = sample_s3_dest_config()
-    stream_name = "test_lookup"
-
-    arn = client.create_delivery_stream(
-        DeliveryStreamName=stream_name, S3DestinationConfiguration=s3_dest_config,
-    )["DeliveryStreamARN"]
-
-    delivery_stream = firehose_backends[TEST_REGION].lookup_name_from_arn(arn)
-    assert delivery_stream.delivery_stream_arn == arn
-    assert delivery_stream.delivery_stream_name == stream_name
