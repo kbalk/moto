@@ -471,7 +471,7 @@ class NetworkInterfaceBackend(object):
             group_ids=group_ids,
             description=description,
             tags=tags,
-            **kwargs
+            **kwargs,
         )
         self.enis[eni.id] = eni
         return eni
@@ -3896,8 +3896,43 @@ class VPCBackend(object):
         return default_services
 
     @staticmethod
-    def _filter_endpoint_services(service_names, filters, services):
+    def _matches_service_by_tags(service, filter_item):
+        """Return True if service tags are not filtered by their tags.
+
+        Note that the API specifies a key of "Values" for a filter, but
+        the botocore library returns "Value" instead.
+        """
+        # For convenience, collect the tags for this service.
+        service_tag_keys = {x["Key"] for x in service["Tags"]}
+        if not service_tag_keys:
+            return False
+
+        matched = True  # assume the best
+        if filter_item["Name"] == "tag-key":
+            # Filters=[{"Name":"tag-key", "Values":["Name"]}],
+            # Any tag with this name, regardless of the tag value.
+            if not service_tag_keys & set(filter_item["Value"]):
+                matched = False
+
+        elif filter_item["Name"].startswith("tag:"):
+            # Filters=[{"Name":"tag:Name", "Values":["my-load-balancer"]}],
+            tag_name = filter_item["Name"].split(":")[1]
+            if not service_tag_keys & {tag_name}:
+                matched = False
+            else:
+                for tag in service["Tags"]:
+                    if tag["Key"] == tag_name and tag["Value"] in filter_item["Value"]:
+                        break
+                else:
+                    matched = False
+        return matched
+
+    @staticmethod
+    def _filter_endpoint_services(service_names_filters, filters, services):
         """Return filtered list of VPC endpoint services."""
+        if not service_names_filters and not filters:
+            return services
+
         # Verify the filters are valid.
         for filter_item in filters:
             if filter_item["Name"] not in [
@@ -3910,12 +3945,14 @@ class VPCBackend(object):
         # Apply both the service_names filter and the filters themselves.
         filtered_services = []
         for service in services:
-            if service_names and service["ServiceName"] not in service_names:
+            if (
+                service_names_filters
+                and service["ServiceName"] not in service_names_filters
+            ):
                 continue
 
-            # For convenience, collect the tags.
-            service_tag_keys = {x["Key"] for x in service["Tags"]}
-
+            # Note that the API specifies a key of "Values" for a filter, but
+            # the botocore library returns "Value" instead.
             matched = True
             for filter_item in filters:
                 if filter_item["Name"] == "service-name":
@@ -3927,32 +3964,19 @@ class VPCBackend(object):
                     if not service_types & set(filter_item["Value"]):
                         matched = False
 
-                elif filter_item["Name"] == "tag-key":
-                    # Filters=[{"Name":"tag-key", "Values":["Name"]}],
-                    # Any tag with this name, regardless of the tag value.
-                    if not service_tag_keys & set(filter_item["Value"]):
+                elif filter_item["Name"] == "tag-key" or filter_item["Name"].startswith(
+                    "tag:"
+                ):
+                    if not VPCBackend._matches_service_by_tags(service, filter_item):
                         matched = False
 
-                elif filter_item["Name"].startswith("tag:"):
-                    # Filters=[{"Name":"tag:Name", "Values":["my-load-balancer"]}],
-                    tag_name = filter_item["Name"].split(":")[1]
-                    if not service_tag_keys & set([tag_name]):
-                        matched = False
-                    else:
-                        # The assumption her is that there is a single value
-                        # to match.  It's ridiculously complicated otherwise.
-                        for tag in service["Tags"]:
-                            if (
-                                tag["Key"] == tag_name
-                                and tag["Value"] == filter_item["Value"][0]
-                            ):
-                                break
-                        else:
-                            matched = False
-
+                # Exit early -- don't bother checking the remaining filters
+                # as a non-match was found.
                 if not matched:
                     break
 
+            # Does the service have a matching service name or does it match
+            # a filter?
             if matched:
                 filtered_services.append(service)
 
@@ -3960,7 +3984,7 @@ class VPCBackend(object):
 
     def describe_vpc_endpoint_services(
         self, dry_run, service_names, filters, max_results, next_token
-    ):  # pylint: disable=unused-argument
+    ):  # pylint: disable=unused-argument,too-many-arguments
         """Return info on services to which you can create a VPC endpoint.
 
         Currently only the default endpoing services are returned.  When
@@ -3990,7 +4014,7 @@ class VPCBackend(object):
         start = 0
         vpc_service_names = sorted([x["ServiceName"] for x in filtered_services])
         if next_token:
-            if not next_token in vpc_service_names:
+            if next_token not in vpc_service_names:
                 raise InvalidNextToken(next_token)
             start = vpc_service_names.index(next_token)
 
