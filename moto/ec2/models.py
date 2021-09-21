@@ -1,19 +1,21 @@
 from __future__ import unicode_literals
 
 import copy
+from datetime import datetime
 import itertools
 import ipaddress
 import json
-import os
+from os import listdir, environ
 import pathlib
 import re
 import warnings
+import weakref
+
+from collections import defaultdict
+from collections import OrderedDict
 
 from boto3 import Session
 
-from collections import defaultdict
-import weakref
-from datetime import datetime
 from moto.packages.boto.ec2.instance import Instance as BotoInstance, Reservation
 from moto.packages.boto.ec2.blockdevicemapping import (
     BlockDeviceMapping,
@@ -24,7 +26,6 @@ from moto.packages.boto.ec2.spotinstancerequest import (
 )
 from moto.packages.boto.ec2.launchspecification import LaunchSpecification
 
-from collections import OrderedDict
 from moto.core import BaseBackend
 from moto.core.models import Model, BaseModel, CloudFormationModel
 from moto.core.utils import (
@@ -34,7 +35,6 @@ from moto.core.utils import (
 from moto.core import ACCOUNT_ID
 from moto.kms import kms_backends
 from moto.utilities.utils import load_resource, merge_multiple_dicts, filter_resources
-from os import listdir
 
 from .exceptions import (
     CidrLimitExceeded,
@@ -65,6 +65,9 @@ from .exceptions import (
     InvalidKeyPairFormatError,
     InvalidKeyPairNameError,
     InvalidAggregationIntervalParameterError,
+    InvalidServiceName,
+    InvalidFilter,
+    InvalidNextToken,
     InvalidDependantParameterError,
     InvalidDependantParameterTypeError,
     InvalidFlowLogIdError,
@@ -199,13 +202,14 @@ for location_type in listdir(root / offerings_path):
         ] = load_resource(__name__, full_path)
 
 
-if "MOTO_AMIS_PATH" in os.environ:
-    with open(os.environ.get("MOTO_AMIS_PATH"), "r", encoding="utf-8") as f:
+if "MOTO_AMIS_PATH" in environ:
+    with open(environ.get("MOTO_AMIS_PATH"), "r", encoding="utf-8") as f:
         AMIS = json.load(f)
 else:
     AMIS = load_resource(__name__, "resources/amis.json")
 
 OWNER_ID = ACCOUNT_ID
+MAX_NUMBER_OF_ENDPOINT_SERVICES_RESULTS = 1000
 
 
 def utc_date_and_time():
@@ -403,15 +407,13 @@ class NetworkInterface(TaggedEC2Resource, CloudFormationModel):
         elif filter_name == "description":
             return self.description
         else:
-            return super(NetworkInterface, self).get_filter_value(
-                filter_name, "DescribeNetworkInterfaces"
-            )
+            return super().get_filter_value(filter_name, "DescribeNetworkInterfaces")
 
 
 class NetworkInterfaceBackend(object):
     def __init__(self):
         self.enis = {}
-        super(NetworkInterfaceBackend, self).__init__()
+        super().__init__()
 
     def create_network_interface(
         self,
@@ -421,7 +423,7 @@ class NetworkInterfaceBackend(object):
         group_ids=None,
         description=None,
         tags=None,
-        **kwargs
+        **kwargs,
     ):
         eni = NetworkInterface(
             self,
@@ -430,7 +432,7 @@ class NetworkInterfaceBackend(object):
             private_ip_addresses,
             group_ids=group_ids,
             description=description,
-            **kwargs
+            **kwargs,
         )
         if tags:
             eni.add_tags(tags)
@@ -526,7 +528,7 @@ class Instance(TaggedEC2Resource, BotoInstance, CloudFormationModel):
     }
 
     def __init__(self, ec2_backend, image_id, user_data, security_groups, **kwargs):
-        super(Instance, self).__init__()
+        super().__init__()
         self.ec2_backend = ec2_backend
         self.id = random_instance_id()
         self.lifecycle = kwargs.get("lifecycle", "")
@@ -953,7 +955,7 @@ class Instance(TaggedEC2Resource, BotoInstance, CloudFormationModel):
 class InstanceBackend(object):
     def __init__(self):
         self.reservations = OrderedDict()
-        super(InstanceBackend, self).__init__()
+        super().__init__()
 
     def get_instance(self, instance_id):
         for instance in self.all_instances():
@@ -1183,7 +1185,7 @@ class InstanceBackend(object):
 
 class InstanceTypeBackend(object):
     def __init__(self):
-        super(InstanceTypeBackend, self).__init__()
+        super().__init__()
 
     def describe_instance_types(self, instance_types=None):
         matches = INSTANCE_TYPES.values()
@@ -1199,7 +1201,7 @@ class InstanceTypeBackend(object):
 
 class InstanceTypeOfferingBackend(object):
     def __init__(self):
-        super(InstanceTypeOfferingBackend, self).__init__()
+        super().__init__()
 
     def describe_instance_type_offerings(self, location_type=None, filters=None):
         location_type = location_type or "region"
@@ -1246,7 +1248,7 @@ class KeyPair(object):
 class KeyPairBackend(object):
     def __init__(self):
         self.keypairs = {}
-        super(KeyPairBackend, self).__init__()
+        super().__init__()
 
     def create_key_pair(self, name):
         if name in self.keypairs:
@@ -1322,7 +1324,7 @@ class TagBackend(object):
 
     def __init__(self):
         self.tags = defaultdict(dict)
-        super(TagBackend, self).__init__()
+        super().__init__()
 
     def create_tags(self, resource_ids, tags):
         if None in set([tags[tag] for tag in tags]):
@@ -1544,7 +1546,7 @@ class Ami(TaggedEC2Resource):
         elif filter_name == "owner-alias":
             return self.owner_alias
         else:
-            return super(Ami, self).get_filter_value(filter_name, "DescribeImages")
+            return super().get_filter_value(filter_name, "DescribeImages")
 
 
 class AmiBackend(object):
@@ -1552,10 +1554,8 @@ class AmiBackend(object):
 
     def __init__(self):
         self.amis = {}
-
         self._load_amis()
-
-        super(AmiBackend, self).__init__()
+        super().__init__()
 
     def _load_amis(self):
         for ami in AMIS:
@@ -2298,7 +2298,7 @@ class SecurityGroupBackend(object):
         self.sg_old_ingress_ruls = {}
         self.sg_old_egress_ruls = {}
 
-        super(SecurityGroupBackend, self).__init__()
+        super().__init__()
 
     def create_security_group(
         self, name, description, vpc_id=None, tags=None, force=False, is_default=None
@@ -3065,7 +3065,7 @@ class Volume(TaggedEC2Resource, CloudFormationModel):
         elif filter_name == "availability-zone":
             return self.zone.name
         else:
-            return super(Volume, self).get_filter_value(filter_name, "DescribeVolumes")
+            return super().get_filter_value(filter_name, "DescribeVolumes")
 
 
 class Snapshot(TaggedEC2Resource):
@@ -3107,9 +3107,7 @@ class Snapshot(TaggedEC2Resource):
         elif filter_name == "owner-id":
             return self.owner_id
         else:
-            return super(Snapshot, self).get_filter_value(
-                filter_name, "DescribeSnapshots"
-            )
+            return super().get_filter_value(filter_name, "DescribeSnapshots")
 
 
 class EBSBackend(object):
@@ -3117,7 +3115,7 @@ class EBSBackend(object):
         self.volumes = {}
         self.attachments = {}
         self.snapshots = {}
-        super(EBSBackend, self).__init__()
+        super().__init__()
 
     def create_volume(
         self, size, zone_name, snapshot_id=None, encrypted=False, kms_key_id=None
@@ -3407,7 +3405,7 @@ class VPC(TaggedEC2Resource, CloudFormationModel):
                 return None
             return self.dhcp_options.id
         else:
-            return super(VPC, self).get_filter_value(filter_name, "DescribeVpcs")
+            return super().get_filter_value(filter_name, "DescribeVpcs")
 
     def modify_vpc_tenancy(self, tenancy):
         if tenancy != "default":
@@ -3502,7 +3500,7 @@ class VPCBackend(object):
         self.vpcs = {}
         self.vpc_end_points = {}
         self.vpc_refs[self.__class__].add(weakref.ref(self))
-        super(VPCBackend, self).__init__()
+        super().__init__()
 
     @classmethod
     def get_vpc_refs(cls):
@@ -3751,8 +3749,9 @@ class VPCBackend(object):
 
         return vpc_end_point
 
-    def delete_vpc_endpoints(self, vpce_ids=[]):
-        vpce_ids
+    def delete_vpc_endpoints(self, vpce_ids=None):
+        if vpce_ids is None:
+            vpce_ids = []
         for vpce_id in vpce_ids:
             vpc_endpoint = self.vpc_end_points.get(vpce_id, None)
             if vpc_endpoint:
@@ -3786,19 +3785,185 @@ class VPCBackend(object):
 
         return generic_filter(filters, vpc_end_points)
 
-    def get_vpc_end_point_services(self):
-        vpc_end_point_services = self.vpc_end_points.values()
+    def _collect_default_endpoint_services(self):
+        # TODO - obtain list of default services.  Using dummy list for now.
+        default_services = [
+            {
+                "AcceptanceRequired": False,
+                "AvailabilityZones": ["us-east-1a", "us-east-1b", "us-east-1f"],
+                "BaseEndpointDnsNames": [
+                    "access-analyzer.us-east-1.vpce.amazonaws.com"
+                ],
+                "ManagesVpcEndpoints": False,
+                "Owner": "amazon",
+                "PrivateDnsName": "access-analyzer.us-east-1.amazonaws.com",
+                "PrivateDnsNameVerificationState": "verified",
+                "PrivateDnsNames": [
+                    {"PrivateDnsName": "access-analyzer.us-east-1.amazonaws.com"}
+                ],
+                "ServiceId": "vpce-svc-01192c2f53abbf891",
+                "ServiceName": "com.amazonaws.us-east-1.access-analyzer",
+                "ServiceType": [{"ServiceType": "Interface"}],
+                "Tags": [],
+                "VpcEndpointPolicySupported": True,
+            },
+            {
+                "AcceptanceRequired": False,
+                "AvailabilityZones": ["us-east-1a", "us-east-1f"],
+                "BaseEndpointDnsNames": ["s3.us-east-1.amazonaws.com"],
+                "ManagesVpcEndpoints": False,
+                "Owner": "amazon",
+                "ServiceId": "vpce-svc-0aa7c06513d4872d5",
+                "ServiceName": "com.amazonaws.us-east-1.s3",
+                "ServiceType": [{"ServiceType": "Gateway"}],
+                "Tags": [],
+                "VpcEndpointPolicySupported": True,
+            },
+            {
+                "AcceptanceRequired": False,
+                "AvailabilityZones": ["us-east-1a", "us-east-1b", "us-east-1f"],
+                "BaseEndpointDnsNames": ["s3.us-east-1.vpce.amazonaws.com"],
+                "ManagesVpcEndpoints": False,
+                "Owner": "amazon",
+                "ServiceId": "vpce-svc-081d84efcdc7bac15",
+                "ServiceName": "com.amazonaws.us-east-1.s3",
+                "ServiceType": [{"ServiceType": "Interface"}],
+                "Tags": [],
+                "VpcEndpointPolicySupported": True,
+            },
+            {
+                "AcceptanceRequired": False,
+                "AvailabilityZones": ["us-east-1a", "us-east-1b", "us-east-1c"],
+                "BaseEndpointDnsNames": ["config.us-east-1.vpce.amazonaws.com"],
+                "ManagesVpcEndpoints": False,
+                "Owner": "amazon",
+                "PrivateDnsName": "config.us-east-1.amazonaws.com",
+                "PrivateDnsNameVerificationState": "verified",
+                "PrivateDnsNames": [
+                    {"PrivateDnsName": "config.us-east-1.amazonaws.com"},
+                ],
+                "ServiceId": "vpce-svc-03e4061bb2e796f1b",
+                "ServiceName": "com.amazonaws.us-east-1.config",
+                "ServiceType": [{"ServiceType": "Interface"}],
+                "Tags": [],
+                "VpcEndpointPolicySupported": True,
+            },
+        ]
+        return default_services
 
-        services = []
-        for value in vpc_end_point_services:
-            services.append(value.service_name)
+    @staticmethod
+    def _filter_endpoint_services(service_names, filters, services):
+        """Return filtered list of VPC endpoint services."""
+        # Verify the filters are valid.
+        for filter_item in filters:
+            if filter_item["Name"] not in [
+                "service-name",
+                "service-type",
+                "tag-key",
+            ] and not filter_item["Name"].startswith("tag:"):
+                raise InvalidFilter(filter_item["Name"])
 
-        availability_zones = EC2Backend.describe_availability_zones(self)
+        # Apply both the service_names filter and the filters themselves.
+        filtered_services = []
+        for service in services:
+            if service_names and service["ServiceName"] not in service_names:
+                continue
+
+            # For convenience, collect the tags.
+            service_tag_keys = {x["Key"] for x in service["Tags"]}
+
+            matched = True
+            for filter_item in filters:
+                if filter_item["Name"] == "service-name":
+                    if service["ServiceName"] not in filter_item["Value"]:
+                        matched = False
+
+                elif filter_item["Name"] == "service-type":
+                    service_types = {x["ServiceType"] for x in service["ServiceType"]}
+                    if not service_types & set(filter_item["Value"]):
+                        matched = False
+
+                elif filter_item["Name"] == "tag-key":
+                    # Filters=[{"Name":"tag-key", "Values":["Name"]}],
+                    # Any tag with this name, regardless of the tag value.
+                    if not service_tag_keys & set(filter_item["Value"]):
+                        matched = False
+
+                elif filter_item["Name"].startswith("tag:"):
+                    # Filters=[{"Name":"tag:Name", "Values":["my-load-balancer"]}],
+                    tag_name = filter_item["Name"].split(":")[1]
+                    if not service_tag_keys & set([tag_name]):
+                        matched = False
+                    else:
+                        # The assumption her is that there is a single value
+                        # to match.  It's ridiculously complicated otherwise.
+                        for tag in service["Tags"]:
+                            if (
+                                tag["Key"] == tag_name
+                                and tag["Value"] == filter_item["Value"][0]
+                            ):
+                                break
+                        else:
+                            matched = False
+
+                if not matched:
+                    break
+
+            if matched:
+                filtered_services.append(service)
+
+        return filtered_services
+
+    def describe_vpc_endpoint_services(
+        self, dry_run, service_names, filters, max_results, next_token
+    ):  # pylint: disable=unused-argument
+        """Return info on services to which you can create a VPC endpoint.
+
+        Currently only the default endpoing services are returned.  When
+        create_vpc_endpoint_service_configuration() is implemented, a
+        list of those private endpoints would be kept and when this API
+        is invoked, those private endpoints would be added to the list of
+        default endpoint services.
+
+        The DryRun parameter is ignored.
+        """
+        default_services = self._collect_default_endpoint_services()
+
+        vpc_service_names = sorted([x["ServiceName"] for x in default_services])
+        for service_name in service_names:
+            if service_name not in vpc_service_names:
+                raise InvalidServiceName(service_name)
+
+        # Apply filters specified in the service_names and filters arguments.
+        filtered_services = self._filter_endpoint_services(
+            service_names, filters, default_services
+        )
+
+        # Determine the start index into list of services based on the
+        # next_token argument.
+        # TODO - service name is not unique; but a combo of service name and
+        # service type is unique.  But if the user filters out that type?
+        start = 0
+        vpc_service_names = sorted([x["ServiceName"] for x in filtered_services])
+        if next_token:
+            if not next_token in vpc_service_names:
+                raise InvalidNextToken(next_token)
+            start = vpc_service_names.index(next_token)
+
+        # Determine the stop index into the list of services based on the
+        # max_results argument.
+        if not max_results or max_results > MAX_NUMBER_OF_ENDPOINT_SERVICES_RESULTS:
+            max_results = MAX_NUMBER_OF_ENDPOINT_SERVICES_RESULTS
+
+        # If necessary, set the value of the next_token.
+        next_token = None
+        if len(filtered_services) > (start + max_results):
+            next_token = filtered_services[start + max_results]
 
         return {
-            "servicesDetails": vpc_end_point_services,
-            "services": services,
-            "availability_zones": availability_zones,
+            "servicesDetails": filtered_services[start : start + max_results],
+            "serviceNames": vpc_service_names,
+            "nextToken": next_token,
         }
 
 
@@ -3880,7 +4045,7 @@ class VPCPeeringConnectionBackend(object):
     def __init__(self):
         self.vpc_pcxs = {}
         self.vpc_pcx_refs[self.__class__].add(weakref.ref(self))
-        super(VPCPeeringConnectionBackend, self).__init__()
+        super().__init__()
 
     @classmethod
     def get_vpc_pcx_refs(cls):
@@ -4081,7 +4246,7 @@ class Subnet(TaggedEC2Resource, CloudFormationModel):
         elif filter_name == "state":
             return self.state
         else:
-            return super(Subnet, self).get_filter_value(filter_name, "DescribeSubnets")
+            return super().get_filter_value(filter_name, "DescribeSubnets")
 
     def get_cfn_attribute(self, attribute_name):
         from moto.cloudformation.exceptions import UnformattedGetAttTemplateException
@@ -4153,7 +4318,7 @@ class SubnetBackend(object):
     def __init__(self):
         # maps availability zone to dict of (subnet_id, subnet)
         self.subnets = defaultdict(dict)
-        super(SubnetBackend, self).__init__()
+        super().__init__()
 
     def get_subnet(self, subnet_id):
         for subnets in self.subnets.values():
@@ -4418,15 +4583,13 @@ class FlowLogs(TaggedEC2Resource, CloudFormationModel):
         elif filter_name == "deliver-log-status":
             return "SUCCESS"
         else:
-            return super(FlowLogs, self).get_filter_value(
-                filter_name, "DescribeFlowLogs"
-            )
+            return super().get_filter_value(filter_name, "DescribeFlowLogs")
 
 
 class FlowLogsBackend(object):
     def __init__(self):
         self.flow_logs = defaultdict(dict)
-        super(FlowLogsBackend, self).__init__()
+        super().__init__()
 
     def _validate_request(
         self,
@@ -4634,7 +4797,7 @@ class SubnetRouteTableAssociation(CloudFormationModel):
 class SubnetRouteTableAssociationBackend(object):
     def __init__(self):
         self.subnet_associations = {}
-        super(SubnetRouteTableAssociationBackend, self).__init__()
+        super().__init__()
 
     def create_subnet_association(self, route_table_id, subnet_id):
         subnet_association = SubnetRouteTableAssociation(route_table_id, subnet_id)
@@ -4700,15 +4863,13 @@ class RouteTable(TaggedEC2Resource, CloudFormationModel):
         elif filter_name == "association.subnet-id":
             return self.associations.values()
         else:
-            return super(RouteTable, self).get_filter_value(
-                filter_name, "DescribeRouteTables"
-            )
+            return super().get_filter_value(filter_name, "DescribeRouteTables")
 
 
 class RouteTableBackend(object):
     def __init__(self):
         self.route_tables = {}
-        super(RouteTableBackend, self).__init__()
+        super().__init__()
 
     def create_route_table(self, vpc_id, tags=[], main=False):
         route_table_id = random_route_table_id()
@@ -4984,7 +5145,7 @@ class ManagedPrefixListBackend(object):
     def __init__(self):
         self.managed_prefix_lists = {}
         self.create_default_pls()
-        super(ManagedPrefixListBackend, self).__init__()
+        super().__init__()
 
     def create_managed_prefix_list(
         self,
@@ -5110,7 +5271,7 @@ class ManagedPrefixListBackend(object):
 
 class RouteBackend(object):
     def __init__(self):
-        super(RouteBackend, self).__init__()
+        super().__init__()
 
     def create_route(
         self,
@@ -5301,7 +5462,7 @@ class InternetGateway(TaggedEC2Resource, CloudFormationModel):
 class InternetGatewayBackend(object):
     def __init__(self):
         self.internet_gateways = {}
-        super(InternetGatewayBackend, self).__init__()
+        super().__init__()
 
     def create_internet_gateway(self, tags=[]):
         igw = InternetGateway(self)
@@ -5373,7 +5534,7 @@ class CarrierGateway(TaggedEC2Resource):
 class CarrierGatewayBackend(object):
     def __init__(self):
         self.carrier_gateways = {}
-        super(CarrierGatewayBackend, self).__init__()
+        super().__init__()
 
     def create_carrier_gateway(self, vpc_id, tags=None):
         vpc = self.get_vpc(vpc_id)
@@ -5429,7 +5590,7 @@ class EgressOnlyInternetGateway(TaggedEC2Resource):
 class EgressOnlyInternetGatewayBackend(object):
     def __init__(self):
         self.egress_only_internet_gateway_backend = {}
-        super(EgressOnlyInternetGatewayBackend, self).__init__()
+        super().__init__()
 
     def create_egress_only_internet_gateway(self, vpc_id, tags=None):
         vpc = self.get_vpc(vpc_id)
@@ -5502,7 +5663,7 @@ class VPCGatewayAttachment(CloudFormationModel):
 class VPCGatewayAttachmentBackend(object):
     def __init__(self):
         self.gateway_attachments = {}
-        super(VPCGatewayAttachmentBackend, self).__init__()
+        super().__init__()
 
     def create_vpc_gateway_attachment(self, vpc_id, gateway_id):
         attachment = VPCGatewayAttachment(vpc_id, gateway_id)
@@ -5533,9 +5694,9 @@ class SpotInstanceRequest(BotoSpotRequest, TaggedEC2Resource):
         subnet_id,
         tags,
         spot_fleet_id,
-        **kwargs
+        **kwargs,
     ):
-        super(SpotInstanceRequest, self).__init__(**kwargs)
+        super().__init__(**kwargs)
         ls = LaunchSpecification()
         self.ec2_backend = ec2_backend
         self.launch_specification = ls
@@ -5577,9 +5738,7 @@ class SpotInstanceRequest(BotoSpotRequest, TaggedEC2Resource):
         elif filter_name == "spot-instance-request-id":
             return self.id
         else:
-            return super(SpotInstanceRequest, self).get_filter_value(
-                filter_name, "DescribeSpotInstanceRequests"
-            )
+            return super().get_filter_value(filter_name, "DescribeSpotInstanceRequests")
 
     def launch_instance(self):
         reservation = self.ec2_backend.add_instances(
@@ -5602,7 +5761,7 @@ class SpotInstanceRequest(BotoSpotRequest, TaggedEC2Resource):
 class SpotRequestBackend(object, metaclass=Model):
     def __init__(self):
         self.spot_instance_requests = {}
-        super(SpotRequestBackend, self).__init__()
+        super().__init__()
 
     def request_spot_instances(
         self,
@@ -5913,7 +6072,7 @@ class SpotFleetRequest(TaggedEC2Resource, CloudFormationModel):
 class SpotFleetBackend(object):
     def __init__(self):
         self.spot_fleet_requests = {}
-        super(SpotFleetBackend, self).__init__()
+        super().__init__()
 
     def request_spot_fleet(
         self,
@@ -6080,15 +6239,13 @@ class ElasticAddress(TaggedEC2Resource, CloudFormationModel):
             # TODO: implement network-interface-owner-id
             raise FilterNotImplementedError(filter_name, "DescribeAddresses")
         else:
-            return super(ElasticAddress, self).get_filter_value(
-                filter_name, "DescribeAddresses"
-            )
+            return super().get_filter_value(filter_name, "DescribeAddresses")
 
 
 class ElasticAddressBackend(object):
     def __init__(self):
         self.addresses = []
-        super(ElasticAddressBackend, self).__init__()
+        super().__init__()
 
     def allocate_address(self, domain, address=None, tags=None):
         if domain not in ["standard", "vpc"]:
@@ -6261,9 +6418,7 @@ class DHCPOptionsSet(TaggedEC2Resource):
             values = [item for item in list(self._options.values()) if item]
             return itertools.chain(*values)
         else:
-            return super(DHCPOptionsSet, self).get_filter_value(
-                filter_name, "DescribeDhcpOptions"
-            )
+            return super().get_filter_value(filter_name, "DescribeDhcpOptions")
 
     @property
     def options(self):
@@ -6273,7 +6428,7 @@ class DHCPOptionsSet(TaggedEC2Resource):
 class DHCPOptionsSetBackend(object):
     def __init__(self):
         self.dhcp_options_sets = {}
-        super(DHCPOptionsSetBackend, self).__init__()
+        super().__init__()
 
     def associate_dhcp_options(self, dhcp_options, vpc):
         dhcp_options.vpc = vpc
@@ -6379,15 +6534,13 @@ class VPNConnection(TaggedEC2Resource):
         self.add_tags(tags or {})
 
     def get_filter_value(self, filter_name):
-        return super(VPNConnection, self).get_filter_value(
-            filter_name, "DescribeVpnConnections"
-        )
+        return super().get_filter_value(filter_name, "DescribeVpnConnections")
 
 
 class VPNConnectionBackend(object):
     def __init__(self):
         self.vpn_connections = {}
-        super(VPNConnectionBackend, self).__init__()
+        super().__init__()
 
     def create_vpn_connection(
         self,
@@ -6453,7 +6606,7 @@ class VPNConnectionBackend(object):
 class NetworkAclBackend(object):
     def __init__(self):
         self.network_acls = {}
-        super(NetworkAclBackend, self).__init__()
+        super().__init__()
 
     def get_network_acl(self, network_acl_id):
         network_acl = self.network_acls.get(network_acl_id, None)
@@ -6641,7 +6794,7 @@ class NetworkAclAssociation(object):
         self.new_association_id = new_association_id
         self.subnet_id = subnet_id
         self.network_acl_id = network_acl_id
-        super(NetworkAclAssociation, self).__init__()
+        super().__init__()
 
 
 class NetworkAcl(TaggedEC2Resource):
@@ -6668,9 +6821,7 @@ class NetworkAcl(TaggedEC2Resource):
         elif filter_name == "owner-id":
             return self.owner_id
         else:
-            return super(NetworkAcl, self).get_filter_value(
-                filter_name, "DescribeNetworkAcls"
-            )
+            return super().get_filter_value(filter_name, "DescribeNetworkAcls")
 
 
 class NetworkAclEntry(TaggedEC2Resource):
@@ -6720,7 +6871,7 @@ class VpnGateway(TaggedEC2Resource):
         self.state = state
         self.add_tags(tags or {})
         self.attachments = {}
-        super(VpnGateway, self).__init__()
+        super().__init__()
 
     def get_filter_value(self, filter_name):
         if filter_name == "attachment.vpc-id":
@@ -6731,22 +6882,20 @@ class VpnGateway(TaggedEC2Resource):
             return self.id
         elif filter_name == "type":
             return self.type
-        return super(VpnGateway, self).get_filter_value(
-            filter_name, "DescribeVpnGateways"
-        )
+        return super().get_filter_value(filter_name, "DescribeVpnGateways")
 
 
 class VpnGatewayAttachment(object):
     def __init__(self, vpc_id, state):
         self.vpc_id = vpc_id
         self.state = state
-        super(VpnGatewayAttachment, self).__init__()
+        super().__init__()
 
 
 class VpnGatewayBackend(object):
     def __init__(self):
         self.vpn_gateways = {}
-        super(VpnGatewayBackend, self).__init__()
+        super().__init__()
 
     def create_vpn_gateway(
         self, type="ipsec.1", amazon_side_asn=None, availability_zone=None, tags=None
@@ -6809,18 +6958,16 @@ class CustomerGateway(TaggedEC2Resource):
         self.attachments = {}
         self.state = state
         self.add_tags(tags or {})
-        super(CustomerGateway, self).__init__()
+        super().__init__()
 
     def get_filter_value(self, filter_name):
-        return super(CustomerGateway, self).get_filter_value(
-            filter_name, "DescribeCustomerGateways"
-        )
+        return super().get_filter_value(filter_name, "DescribeCustomerGateways")
 
 
 class CustomerGatewayBackend(object):
     def __init__(self):
         self.customer_gateways = {}
-        super(CustomerGatewayBackend, self).__init__()
+        super().__init__()
 
     def create_customer_gateway(
         self, type="ipsec.1", ip_address=None, bgp_asn=None, tags=None
@@ -6945,7 +7092,7 @@ class TransitGateway(TaggedEC2Resource, CloudFormationModel):
 class TransitGatewayBackend(object):
     def __init__(self):
         self.transit_gateways = {}
-        super(TransitGatewayBackend, self).__init__()
+        super().__init__()
 
     def create_transit_gateway(self, description=None, options=None, tags=[]):
         transit_gateway = TransitGateway(self, description, options)
@@ -7020,7 +7167,7 @@ class TransitGatewayRouteTable(TaggedEC2Resource):
 class TransitGatewayRouteTableBackend(object):
     def __init__(self):
         self.transit_gateways_route_tables = {}
-        super(TransitGatewayRouteTableBackend, self).__init__()
+        super().__init__()
 
     def create_transit_gateway_route_table(
         self,
@@ -7339,7 +7486,7 @@ class TransitGatewayPeeringAttachment(TransitGatewayAttachment):
 class TransitGatewayAttachmentBackend(object):
     def __init__(self):
         self.transit_gateway_attachments = {}
-        super(TransitGatewayAttachmentBackend, self).__init__()
+        super().__init__()
 
     def create_transit_gateway_vpn_attachment(
         self, vpn_id, transit_gateway_id, tags=[]
@@ -7584,7 +7731,7 @@ class TransitGatewayRelationsBackend(object):
     def __init__(self):
         self.transit_gateway_associations = {}
         self.transit_gateway_propagations = {}
-        super(TransitGatewayRelationsBackend, self).__init__()
+        super().__init__()
 
     def associate_transit_gateway_route_table(
         self, transit_gateway_attachment_id=None, transit_gateway_route_table_id=None
@@ -7731,7 +7878,7 @@ class NatGateway(CloudFormationModel, TaggedEC2Resource):
 class NatGatewayBackend(object):
     def __init__(self):
         self.nat_gateways = {}
-        super(NatGatewayBackend, self).__init__()
+        super().__init__()
 
     def describe_nat_gateways(self, filters, nat_gateway_ids):
         nat_gateways = list(self.nat_gateways.values())
@@ -7854,9 +8001,7 @@ class LaunchTemplate(TaggedEC2Resource):
         if filter_name == "launch-template-name":
             return self.name
         else:
-            return super(LaunchTemplate, self).get_filter_value(
-                filter_name, "DescribeLaunchTemplates"
-            )
+            return super().get_filter_value(filter_name, "DescribeLaunchTemplates")
 
 
 class LaunchTemplateBackend(object):
@@ -7864,7 +8009,7 @@ class LaunchTemplateBackend(object):
         self.launch_template_name_to_ids = {}
         self.launch_templates = OrderedDict()
         self.launch_template_insert_order = []
-        super(LaunchTemplateBackend, self).__init__()
+        super().__init__()
 
     def create_launch_template(self, name, description, template_data):
         if name in self.launch_template_name_to_ids:
@@ -7909,7 +8054,7 @@ class IamInstanceProfileAssociation(CloudFormationModel):
 class IamInstanceProfileAssociationBackend(object):
     def __init__(self):
         self.iam_instance_profile_associations = {}
-        super(IamInstanceProfileAssociationBackend, self).__init__()
+        super().__init__()
 
     def associate_iam_instance_profile(
         self,
@@ -8055,7 +8200,7 @@ class EC2Backend(
 ):
     def __init__(self, region_name):
         self.region_name = region_name
-        super(EC2Backend, self).__init__()
+        super().__init__()
 
         # Default VPC exists by default, which is the current behavior
         # of EC2-VPC. See for detail:
