@@ -134,11 +134,11 @@ from .utils import (
     random_internet_gateway_id,
     random_egress_only_internet_gateway_id,
     random_ip,
+    random_mac_address,
     random_ipv6_cidr,
     random_transit_gateway_attachment_id,
     random_transit_gateway_route_table_id,
     random_vpc_ep_id,
-    randor_ipv4_cidr,
     random_launch_template_id,
     random_nat_gateway_id,
     random_transit_gateway_id,
@@ -281,15 +281,16 @@ class NetworkInterface(TaggedEC2Resource, CloudFormationModel):
         private_ip_address,
         private_ip_addresses=None,
         device_index=0,
-        public_ip_auto_assign=True,
+        public_ip_auto_assign=False,
         group_ids=None,
         description=None,
+        tags=None,
     ):
         self.ec2_backend = ec2_backend
         self.id = random_eni_id()
         self.device_index = device_index
-        self.private_ip_address = private_ip_address or random_private_ip()
-        self.private_ip_addresses = private_ip_addresses
+        self.private_ip_address = private_ip_address or None
+        self.private_ip_addresses = private_ip_addresses or []
         self.subnet = subnet
         self.instance = None
         self.attachment_id = None
@@ -299,12 +300,34 @@ class NetworkInterface(TaggedEC2Resource, CloudFormationModel):
         self.public_ip = None
         self.public_ip_auto_assign = public_ip_auto_assign
         self.start()
-
+        self.add_tags(tags or {})
+        self.status = "available"
         self.attachments = []
-
+        self.mac_address = random_mac_address()
+        self.interface_type = "interface"
         # Local set to the ENI. When attached to an instance, @property group_set
         #   returns groups for both self and the attached instance.
         self._group_set = []
+
+        if not self.private_ip_address:
+            if self.private_ip_addresses:
+                for ip in self.private_ip_addresses:
+                    if isinstance(ip, list) and ip.get("Primary", False) in [
+                        "true",
+                        True,
+                        "True",
+                    ]:
+                        self.private_ip_address = ip.get("PrivateIpAddress")
+                    if isinstance(ip, str):
+                        self.private_ip_address = self.private_ip_addresses[0]
+                        break
+            else:
+                self.private_ip_address = random_private_ip()
+
+        if not self.private_ip_addresses and self.private_ip_address:
+            self.private_ip_addresses.append(
+                {"Primary": True, "PrivateIpAddress": self.private_ip_address}
+            )
 
         group = None
         if group_ids:
@@ -322,6 +345,21 @@ class NetworkInterface(TaggedEC2Resource, CloudFormationModel):
                     self.ec2_backend.groups[subnet.vpc_id][group_id] = group
                 if group:
                     self._group_set.append(group)
+
+    @property
+    def owner_id(self):
+        return ACCOUNT_ID
+
+    @property
+    def association(self):
+        association = {}
+        if self.public_ip:
+            eips = self.ec2_backend.address_by_ip([self.public_ip])
+            eip = eips[0] if len(eips) > 0 else None
+            if eip:
+                association["allocationId"] = eip.allocation_id or None
+                association["associationId"] = eip.association_id or None
+        return association
 
     @staticmethod
     def cloudformation_name_type():
@@ -432,10 +470,9 @@ class NetworkInterfaceBackend(object):
             private_ip_addresses,
             group_ids=group_ids,
             description=description,
-            **kwargs,
+            tags=tags,
+            **kwargs
         )
-        if tags:
-            eni.add_tags(tags)
         self.enis[eni.id] = eni
         return eni
 
@@ -3706,8 +3743,8 @@ class VPCBackend(object):
 
         # validates if vpc is present or not.
         self.get_vpc(vpc_id)
+        destination_prefix_list_id = None
 
-        service_destination_cidr = None
         if type and type.lower() == "interface":
 
             network_interface_ids = []
@@ -3720,10 +3757,10 @@ class VPCBackend(object):
 
         else:
             # considering gateway if type is not mentioned.
-            service_destination_cidr = randor_ipv4_cidr()
+            for prefix_list in self.managed_prefix_lists.values():
+                if prefix_list.prefix_list_name == service_name:
+                    destination_prefix_list_id = prefix_list.id
 
-            for route_table_id in route_table_ids:
-                self.create_route(route_table_id, service_destination_cidr)
         if dns_entries:
             dns_entries = [dns_entries]
 
@@ -3742,16 +3779,23 @@ class VPCBackend(object):
             security_group_ids,
             tags,
             private_dns_enabled,
-            service_destination_cidr,
+            destination_prefix_list_id,
         )
 
         self.vpc_end_points[vpc_endpoint_id] = vpc_end_point
 
+        if destination_prefix_list_id:
+            for route_table_id in route_table_ids:
+                self.create_route(
+                    route_table_id,
+                    None,
+                    gateway_id=vpc_endpoint_id,
+                    destination_prefix_list_id=destination_prefix_list_id,
+                )
+
         return vpc_end_point
 
-    def delete_vpc_endpoints(self, vpce_ids=None):
-        if vpce_ids is None:
-            vpce_ids = []
+    def delete_vpc_endpoints(self, vpce_ids=[]):
         for vpce_id in vpce_ids:
             vpc_endpoint = self.vpc_end_points.get(vpce_id, None)
             if vpc_endpoint:
@@ -3761,7 +3805,7 @@ class VPCBackend(object):
                 else:
                     for route_table_id in vpc_endpoint.route_table_ids:
                         self.delete_route(
-                            route_table_id, vpc_endpoint.service_destination_cidr
+                            route_table_id, vpc_endpoint.destination_prefix_list_id
                         )
                 vpc_endpoint.state = "deleted"
         return True
@@ -3965,6 +4009,12 @@ class VPCBackend(object):
             "serviceNames": vpc_service_names,
             "nextToken": next_token,
         }
+
+    def get_vpc_end_point(self, vpc_end_point_id):
+        vpc_end_point = self.vpc_end_points.get(vpc_end_point_id)
+        if not vpc_end_point:
+            raise InvalidVpcEndPointIdError(vpc_end_point_id)
+        return vpc_end_point
 
 
 class PeeringConnectionStatus(object):
@@ -4196,9 +4246,7 @@ class Subnet(TaggedEC2Resource, CloudFormationModel):
             for eni in self.ec2_backend.get_all_network_interfaces()
             if eni.subnet.id == self.id
         ]
-        addresses_taken = [
-            eni.private_ip_address for eni in enis if eni.private_ip_address
-        ]
+        addresses_taken = []
         for eni in enis:
             if eni.private_ip_addresses:
                 addresses_taken.extend(eni.private_ip_addresses)
@@ -4988,7 +5036,7 @@ class Route(CloudFormationModel):
         route_table,
         destination_cidr_block,
         destination_ipv6_cidr_block,
-        prefix_list=None,
+        destination_prefix_list=None,
         local=False,
         gateway=None,
         instance=None,
@@ -5000,12 +5048,15 @@ class Route(CloudFormationModel):
         carrier_gateway=None,
     ):
         self.id = generate_route_id(
-            route_table.id, destination_cidr_block, destination_ipv6_cidr_block
+            route_table.id,
+            destination_cidr_block,
+            destination_ipv6_cidr_block,
+            destination_prefix_list.id if destination_prefix_list else None,
         )
         self.route_table = route_table
         self.destination_cidr_block = destination_cidr_block
         self.destination_ipv6_cidr_block = destination_ipv6_cidr_block
-        self.prefix_list = prefix_list
+        self.destination_prefix_list = destination_prefix_list
         self.local = local
         self.gateway = gateway
         self.instance = instance
@@ -5076,7 +5127,7 @@ class VPCEndPoint(TaggedEC2Resource):
         security_group_ids=None,
         tags=None,
         private_dns_enabled=None,
-        service_destination_cidr=None,
+        destination_prefix_list_id=None,
     ):
         self.ec2_backend = ec2_backend
         self.id = id
@@ -5091,10 +5142,9 @@ class VPCEndPoint(TaggedEC2Resource):
         self.client_token = client_token
         self.security_group_ids = security_group_ids
         self.private_dns_enabled = private_dns_enabled
-        # self.created_at = utc_date_and_time()
         self.dns_entries = dns_entries
         self.add_tags(tags or {})
-        self.service_destination_cidr = service_destination_cidr
+        self.destination_prefix_list_id = destination_prefix_list_id
 
     @property
     def owner_id(self):
@@ -5294,7 +5344,7 @@ class RouteBackend(object):
         transit_gateway = None
         egress_only_igw = None
         interface = None
-        prefix_list = None
+        destination_prefix_list = None
         carrier_gateway = None
 
         route_table = self.get_route_table(route_table_id)
@@ -5309,6 +5359,8 @@ class RouteBackend(object):
                     gateway = self.get_vpn_gateway(gateway_id)
                 elif EC2_RESOURCE_TO_PREFIX["internet-gateway"] in gateway_id:
                     gateway = self.get_internet_gateway(gateway_id)
+                elif EC2_RESOURCE_TO_PREFIX["vpc-endpoint"] in gateway_id:
+                    gateway = self.get_vpc_end_point(gateway_id)
 
             try:
                 if destination_cidr_block:
@@ -5323,7 +5375,9 @@ class RouteBackend(object):
             if transit_gateway_id is not None:
                 transit_gateway = self.transit_gateways.get(transit_gateway_id)
             if destination_prefix_list_id is not None:
-                prefix_list = self.managed_prefix_lists.get(destination_prefix_list_id)
+                destination_prefix_list = self.managed_prefix_lists.get(
+                    destination_prefix_list_id
+                )
             if carrier_gateway_id is not None:
                 carrier_gateway = self.carrier_gateways.get(carrier_gateway_id)
 
@@ -5331,7 +5385,7 @@ class RouteBackend(object):
             route_table,
             destination_cidr_block,
             destination_ipv6_cidr_block,
-            prefix_list,
+            destination_prefix_list,
             local=local,
             gateway=gateway,
             instance=self.get_instance(instance_id) if instance_id else None,
@@ -5408,12 +5462,18 @@ class RouteBackend(object):
         return route_table.get(route_id)
 
     def delete_route(
-        self, route_table_id, destination_cidr_block, destination_ipv6_cidr_block=None
+        self,
+        route_table_id,
+        destination_cidr_block,
+        destination_ipv6_cidr_block=None,
+        destination_prefix_list_id=None,
     ):
         cidr = destination_cidr_block
         route_table = self.get_route_table(route_table_id)
         if destination_ipv6_cidr_block:
             cidr = destination_ipv6_cidr_block
+        if destination_prefix_list_id:
+            cidr = destination_prefix_list_id
         route_id = generate_route_id(route_table_id, cidr)
         deleted = route_table.routes.pop(route_id, None)
         if not deleted:
@@ -7851,8 +7911,9 @@ class NatGateway(CloudFormationModel, TaggedEC2Resource):
 
     @property
     def public_ip(self):
-        eips = self._backend.address_by_allocation([self.allocation_id])
-        return eips[0].public_ip
+        if self.allocation_id:
+            eips = self._backend.address_by_allocation([self.allocation_id])
+        return eips[0].public_ip if self.allocation_id else None
 
     @staticmethod
     def cloudformation_name_type():
