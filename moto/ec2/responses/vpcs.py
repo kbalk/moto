@@ -212,6 +212,7 @@ class VPCs(BaseResponse):
             filters=self._get_multi_param("Filter"),
             max_results=self._get_int_param("MaxResults"),
             next_token=self._get_param("NextToken"),
+            region=self.region,
         )
         template = self.response_template(DESCRIBE_VPC_ENDPOINT_SERVICES_RESPONSE)
         return template.render(vpc_end_points=vpc_end_point_services)

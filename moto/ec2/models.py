@@ -7,7 +7,9 @@ import ipaddress
 import json
 from os import listdir, environ
 import pathlib
+import random
 import re
+import string
 import warnings
 import weakref
 
@@ -195,10 +197,10 @@ offerings_path = "resources/instance_type_offerings"
 INSTANCE_TYPE_OFFERINGS = {}
 for location_type in listdir(root / offerings_path):
     INSTANCE_TYPE_OFFERINGS[location_type] = {}
-    for region in listdir(root / offerings_path / location_type):
-        full_path = offerings_path + "/" + location_type + "/" + region
+    for _region in listdir(root / offerings_path / location_type):
+        full_path = offerings_path + "/" + location_type + "/" + _region
         INSTANCE_TYPE_OFFERINGS[location_type][
-            region.replace(".json", "")
+            _region.replace(".json", "")
         ] = load_resource(__name__, full_path)
 
 
@@ -3829,70 +3831,34 @@ class VPCBackend(object):
 
         return generic_filter(filters, vpc_end_points)
 
-    def _collect_default_endpoint_services(self):
-        # TODO - obtain list of default services.  Using dummy list for now.
-        default_services = [
-            {
-                "AcceptanceRequired": False,
-                "AvailabilityZones": ["us-east-1a", "us-east-1b", "us-east-1f"],
-                "BaseEndpointDnsNames": [
-                    "access-analyzer.us-east-1.vpce.amazonaws.com"
-                ],
-                "ManagesVpcEndpoints": False,
-                "Owner": "amazon",
-                "PrivateDnsName": "access-analyzer.us-east-1.amazonaws.com",
-                "PrivateDnsNameVerificationState": "verified",
-                "PrivateDnsNames": [
-                    {"PrivateDnsName": "access-analyzer.us-east-1.amazonaws.com"}
-                ],
-                "ServiceId": "vpce-svc-01192c2f53abbf891",
-                "ServiceName": "com.amazonaws.us-east-1.access-analyzer",
-                "ServiceType": [{"ServiceType": "Interface"}],
-                "Tags": [],
-                "VpcEndpointPolicySupported": True,
-            },
-            {
-                "AcceptanceRequired": False,
-                "AvailabilityZones": ["us-east-1a", "us-east-1f"],
-                "BaseEndpointDnsNames": ["s3.us-east-1.amazonaws.com"],
-                "ManagesVpcEndpoints": False,
-                "Owner": "amazon",
-                "ServiceId": "vpce-svc-0aa7c06513d4872d5",
-                "ServiceName": "com.amazonaws.us-east-1.s3",
-                "ServiceType": [{"ServiceType": "Gateway"}],
-                "Tags": [],
-                "VpcEndpointPolicySupported": True,
-            },
-            {
-                "AcceptanceRequired": False,
-                "AvailabilityZones": ["us-east-1a", "us-east-1b", "us-east-1f"],
-                "BaseEndpointDnsNames": ["s3.us-east-1.vpce.amazonaws.com"],
-                "ManagesVpcEndpoints": False,
-                "Owner": "amazon",
-                "ServiceId": "vpce-svc-081d84efcdc7bac15",
-                "ServiceName": "com.amazonaws.us-east-1.s3",
-                "ServiceType": [{"ServiceType": "Interface"}],
-                "Tags": [],
-                "VpcEndpointPolicySupported": True,
-            },
-            {
-                "AcceptanceRequired": False,
-                "AvailabilityZones": ["us-east-1a", "us-east-1b", "us-east-1c"],
-                "BaseEndpointDnsNames": ["config.us-east-1.vpce.amazonaws.com"],
-                "ManagesVpcEndpoints": False,
-                "Owner": "amazon",
-                "PrivateDnsName": "config.us-east-1.amazonaws.com",
-                "PrivateDnsNameVerificationState": "verified",
-                "PrivateDnsNames": [
-                    {"PrivateDnsName": "config.us-east-1.amazonaws.com"},
-                ],
-                "ServiceId": "vpce-svc-03e4061bb2e796f1b",
-                "ServiceName": "com.amazonaws.us-east-1.config",
-                "ServiceType": [{"ServiceType": "Interface"}],
-                "Tags": [],
-                "VpcEndpointPolicySupported": True,
-            },
+    @staticmethod
+    def _collect_default_endpoint_services(region):
+        """Return list of default services using list of backends."""
+        zones = [
+            zone.name
+            for zones in RegionsAndZonesBackend.zones.values()
+            for zone in zones
+            if zone.name.startswith(region)
         ]
+
+        # Rather than import this function in each of the backends, this
+        # function will be passed as an argument.
+        def vpce_random_number():
+            """Create a 17 digit number of lowercase hex."""
+            return "".join([random.choice(string.hexdigits.lower()) for i in range(17)])
+
+        from moto import backends  # pylint: disable=import-outside-toplevel
+
+        default_services = []
+        for _backends in backends.unique_backends():
+            for region_name, backend in _backends.items():
+                if region_name not in [region, "global"]:
+                    continue
+                service = backend.default_vpc_endpoint_service(
+                    region, zones, vpce_random_number
+                )
+                if service:
+                    default_services.extend(service)
         return default_services
 
     @staticmethod
@@ -3983,7 +3949,7 @@ class VPCBackend(object):
         return filtered_services
 
     def describe_vpc_endpoint_services(
-        self, dry_run, service_names, filters, max_results, next_token
+        self, dry_run, service_names, filters, max_results, next_token, region
     ):  # pylint: disable=unused-argument,too-many-arguments
         """Return info on services to which you can create a VPC endpoint.
 
@@ -3995,7 +3961,7 @@ class VPCBackend(object):
 
         The DryRun parameter is ignored.
         """
-        default_services = self._collect_default_endpoint_services()
+        default_services = self._collect_default_endpoint_services(region)
 
         vpc_service_names = sorted([x["ServiceName"] for x in default_services])
         for service_name in service_names:

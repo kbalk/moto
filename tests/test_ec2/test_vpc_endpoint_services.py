@@ -24,7 +24,7 @@ def test_describe_vpc_endpoint_services_bad_args():
     # not "ServiceType".
     with pytest.raises(ClientError) as exc:
         ec2.describe_vpc_endpoint_services(
-            ServiceNames=["com.amazonaws.us-east-1.s3"],
+            ServiceNames=["com.amazonaws.us-west-1.s3"],
             Filters=[{"Name": "ServiceType", "Values": ["Gateway"]}],
         )
     err = exc.value.response["Error"]
@@ -34,7 +34,7 @@ def test_describe_vpc_endpoint_services_bad_args():
     # Bad token -- a token of "foo" has no correlation with this data.
     with pytest.raises(ClientError) as exc:
         ec2.describe_vpc_endpoint_services(
-            ServiceNames=["com.amazonaws.us-east-1.s3"],
+            ServiceNames=["com.amazonaws.us-west-1.s3"],
             Filters=[{"Name": "service-type", "Values": ["Gateway"]}],
             NextToken="foo",
         )
@@ -48,56 +48,56 @@ def fake_endpoint_services():
     return [
         {
             "AcceptanceRequired": False,
-            "AvailabilityZones": ["us-east-1a", "us-east-1b"],
-            "BaseEndpointDnsNames": ["access-analyzer.us-east-1.vpce.amazonaws.com"],
+            "AvailabilityZones": ["us-west-1a", "us-west-1b"],
+            "BaseEndpointDnsNames": ["access-analyzer.us-west-1.vpce.amazonaws.com"],
             "ManagesVpcEndpoints": False,
             "Owner": "amazon",
-            "PrivateDnsName": "access-analyzer.us-east-1.amazonaws.com",
+            "PrivateDnsName": "access-analyzer.us-west-1.amazonaws.com",
             "PrivateDnsNameVerificationState": "verified",
             "PrivateDnsNames": [
-                {"PrivateDnsName": "access-analyzer.us-east-1.amazonaws.com"},
+                {"PrivateDnsName": "access-analyzer.us-west-1.amazonaws.com"},
             ],
-            "ServiceId": "vpce-svc-01192c2f53abbf891",
-            "ServiceName": "com.amazonaws.us-east-1.access-analyzer",
+            "ServiceId": "vpce-svc-1",
+            "ServiceName": "com.amazonaws.us-west-1.access-analyzer",
             "ServiceType": [{"ServiceType": "Interface"}],
             "Tags": [],
             "VpcEndpointPolicySupported": True,
         },
         {
             "AcceptanceRequired": False,
-            "AvailabilityZones": ["us-east-1a", "us-east-1b"],
-            "BaseEndpointDnsNames": ["config.us-east-1.vpce.amazonaws.com"],
+            "AvailabilityZones": ["us-west-1a", "us-west-1b"],
+            "BaseEndpointDnsNames": ["config.us-west-1.vpce.amazonaws.com"],
             "ManagesVpcEndpoints": False,
             "Owner": "amazon",
-            "PrivateDnsName": "config.us-east-1.amazonaws.com",
+            "PrivateDnsName": "config.us-west-1.amazonaws.com",
             "PrivateDnsNameVerificationState": "verified",
-            "PrivateDnsNames": [{"PrivateDnsName": "config.us-east-1.amazonaws.com"}],
-            "ServiceId": "vpce-svc-03e4061bb2e796f1b",
-            "ServiceName": "com.amazonaws.us-east-1.config",
+            "PrivateDnsNames": [{"PrivateDnsName": "config.us-west-1.amazonaws.com"}],
+            "ServiceId": "vpce-svc-2",
+            "ServiceName": "com.amazonaws.us-west-1.config",
             "ServiceType": [{"ServiceType": "Interface"}],
             "Tags": [],
             "VpcEndpointPolicySupported": True,
         },
         {
             "AcceptanceRequired": True,
-            "AvailabilityZones": ["us-east-1a", "us-east-1b"],
-            "BaseEndpointDnsNames": ["s3.us-east-1.amazonaws.com"],
+            "AvailabilityZones": ["us-west-1a", "us-west-1b"],
+            "BaseEndpointDnsNames": ["s3.us-west-1.amazonaws.com"],
             "ManagesVpcEndpoints": True,
             "Owner": "amazon",
-            "ServiceId": "vpce-svc-0aa7c06513d4872d5",
-            "ServiceName": "com.amazonaws.us-east-1.s3",
+            "ServiceId": "vpce-svc-3",
+            "ServiceName": "com.amazonaws.us-west-1.s3",
             "ServiceType": [{"ServiceType": "Gateway"}],
             "Tags": [{"Key": "Name", "Value": "s3_gw"}],
             "VpcEndpointPolicySupported": False,
         },
         {
             "AcceptanceRequired": False,
-            "AvailabilityZones": ["us-east-1a", "us-east-1b"],
-            "BaseEndpointDnsNames": ["s3.us-east-1.vpce.amazonaws.com"],
+            "AvailabilityZones": ["us-west-1a", "us-west-1b"],
+            "BaseEndpointDnsNames": ["s3.us-west-1.vpce.amazonaws.com"],
             "ManagesVpcEndpoints": False,
             "Owner": "amazon",
-            "ServiceId": "vpce-svc-081d84efcdc7bac15",
-            "ServiceName": "com.amazonaws.us-east-1.s3",
+            "ServiceId": "vpce-svc-4",
+            "ServiceName": "com.amazonaws.us-west-1.s3",
             "ServiceType": [{"ServiceType": "Interface"}],
             "Tags": [
                 {"Key": "Name", "Value": "s3_if"},
@@ -111,12 +111,12 @@ def fake_endpoint_services():
 def validate_s3_service_endpoint_gateway(details):
     """Validate response contains appropriate s3 Gateway service details."""
     assert details["AcceptanceRequired"] is True
-    assert details["AvailabilityZones"] == ["us-east-1a", "us-east-1b"]
-    assert details["BaseEndpointDnsNames"] == ["s3.us-east-1.amazonaws.com"]
+    assert details["AvailabilityZones"] == ["us-west-1a", "us-west-1b"]
+    assert details["BaseEndpointDnsNames"] == ["s3.us-west-1.amazonaws.com"]
     assert details["ManagesVpcEndpoints"] is True
     assert details["Owner"] == "amazon"
-    assert details["ServiceId"] == "vpce-svc-0aa7c06513d4872d5"
-    assert details["ServiceName"] == "com.amazonaws.us-east-1.s3"
+    assert details["ServiceId"] == "vpce-svc-3"
+    assert details["ServiceName"] == "com.amazonaws.us-west-1.s3"
     assert details["ServiceType"] == [{"ServiceType": "Gateway"}]
     assert details["VpcEndpointPolicySupported"] is False
     assert details["Tags"][0] == {"Key": "Name", "Value": "s3_gw"}
@@ -125,12 +125,12 @@ def validate_s3_service_endpoint_gateway(details):
 def validate_s3_service_endpoint_interface(details):
     """Validate response contains appropriate s3 Gateway service details."""
     assert details["AcceptanceRequired"] is False
-    assert details["AvailabilityZones"] == ["us-east-1a", "us-east-1b"]
-    assert details["BaseEndpointDnsNames"] == ["s3.us-east-1.vpce.amazonaws.com"]
+    assert details["AvailabilityZones"] == ["us-west-1a", "us-west-1b"]
+    assert details["BaseEndpointDnsNames"] == ["s3.us-west-1.vpce.amazonaws.com"]
     assert details["ManagesVpcEndpoints"] is False
     assert details["Owner"] == "amazon"
-    assert details["ServiceId"] == "vpce-svc-081d84efcdc7bac15"
-    assert details["ServiceName"] == "com.amazonaws.us-east-1.s3"
+    assert details["ServiceId"] == "vpce-svc-4"
+    assert details["ServiceName"] == "com.amazonaws.us-west-1.s3"
     assert details["ServiceType"] == [{"ServiceType": "Interface"}]
     assert details["VpcEndpointPolicySupported"] is True
     assert details["Tags"][0] == {"Key": "Name", "Value": "s3_if"}
@@ -151,7 +151,7 @@ def test_describe_vpc_endpoint_services_filters():
 
     # Test a service name filter, using s3 as the service name.
     filtered_services = ec2_backend._filter_endpoint_services(
-        ["com.amazonaws.us-east-1.s3"], [], test_data,
+        ["com.amazonaws.us-west-1.s3"], [], test_data,
     )
     assert len(filtered_services) == 2
     validate_s3_service_endpoint_gateway(filtered_services[0])
@@ -185,7 +185,7 @@ def test_describe_vpc_endpoint_services_filters():
 
     # Test a combo of service name and multiple filters.
     filtered_services = ec2_backend._filter_endpoint_services(
-        ["com.amazonaws.us-east-1.s3"],
+        ["com.amazonaws.us-west-1.s3"],
         [{"Name": "tag:Environ", "Value": ["test"]}],
         test_data,
     )
