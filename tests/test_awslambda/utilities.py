@@ -121,11 +121,11 @@ def get_role_name():
             )["Role"]["Arn"]
 
 
-def wait_for_log_msg(expected_msg, log_group):
+def wait_for_log_msg(expected_msg, log_group, max_wait=30):
     logs_conn = boto3.client("logs", region_name="us-east-1")
     received_messages = []
     start = time.time()
-    while (time.time() - start) < 30:
+    while (time.time() - start) < max_wait:
         try:
             result = logs_conn.describe_log_streams(logGroupName=log_group)
             log_streams = result.get("logStreams")

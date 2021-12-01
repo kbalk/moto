@@ -17,6 +17,7 @@ from werkzeug.serving import run_simple
 
 import moto.backends as backends
 import moto.backend_index as backend_index
+import moto.settings as settings
 from moto.core.utils import convert_flask_to_httpretty_response
 
 HTTP_METHODS = ["GET", "POST", "PUT", "DELETE", "HEAD", "PATCH", "OPTIONS"]
@@ -368,6 +369,8 @@ def main(argv=sys.argv[1:]):
     if "MOTO_PORT" not in os.environ:
         reset_server_port = True
         os.environ["MOTO_PORT"] = f"{args.port}"
+
+    os.environ["MOTO_HOST"] = settings.moto_server_host()
 
     try:
         signal.signal(signal.SIGINT, partial(signal_handler, reset_server_port))
