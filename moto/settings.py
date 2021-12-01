@@ -51,12 +51,11 @@ def moto_server_port():
 
 
 def moto_server_host():
-    _port = moto_server_port()
     if is_docker():
-        host = get_docker_host()
+        return get_docker_host()
     else:
-        host = "http://host.docker.internal"
-    return f"{host}:{_port}"
+        _port = moto_server_port()
+        return f"http://host.docker.internal:{_port}"
 
 
 def is_docker():
@@ -69,10 +68,26 @@ def is_docker():
 
 
 def get_docker_host():
+    internal_port = moto_server_port()
     try:
         cmd = "curl -s --unix-socket /run/docker.sock http://docker/containers/$HOSTNAME/json"
         container_info = os.popen(cmd).read()
-        _ip = json.loads(container_info)["NetworkSettings"]["IPAddress"]
-        return f"http://{_ip}"
-    except:  # noqa
-        return "http://host.docker.internal"
+        container_info = json.loads(container_info)
+        _ip = container_info["NetworkSettings"]["IPAddress"]
+        ports = container_info["HostConfig"]["PortBindings"]
+        port = get_docker_port(ports, internal_port)
+        return f"http://{_ip}:{port}"
+    except Exception as e:  # noqa
+        print("    Unable to get host from Docker API:")
+        print(e.message)
+        return f"http://host.docker.internal:{internal_port}"
+
+
+def get_docker_port(ports, internal_port):
+    try:
+        port = ports[f"{internal_port}/tcp"][0]["HostPort"]
+    except Exception as e:
+        print("   Unable to retrieve port from Docker PortBindings:")
+        print(e.message)
+        port = internal_port
+    return port
