@@ -4,7 +4,6 @@ import json
 import os
 import signal
 import sys
-from functools import partial
 from threading import Lock
 
 from flask import Flask
@@ -17,6 +16,7 @@ from werkzeug.serving import run_simple
 
 import moto.backends as backends
 import moto.backend_index as backend_index
+import moto.settings as settings
 from moto.core.utils import convert_flask_to_httpretty_response
 
 HTTP_METHODS = ["GET", "POST", "PUT", "DELETE", "HEAD", "PATCH", "OPTIONS"]
@@ -315,9 +315,7 @@ def create_backend_app(service):
     return backend_app
 
 
-def signal_handler(reset_server_port, signum, frame):
-    if reset_server_port:
-        del os.environ["MOTO_PORT"]
+def signal_handler(signum, frame):
     sys.exit(0)
 
 
@@ -364,14 +362,16 @@ def main(argv=sys.argv[1:]):
 
     args = parser.parse_args(argv)
 
-    reset_server_port = False
-    if "MOTO_PORT" not in os.environ:
-        reset_server_port = True
-        os.environ["MOTO_PORT"] = f"{args.port}"
+    print("===========")
+    os.environ["MOTO_PORT"] = f"{args.port}"
+    os.environ["MOTO_HOST"] = settings.moto_server_host()
+    print("============")
+    print(os.environ["MOTO_PORT"])
+    print(os.environ["MOTO_HOST"])
 
     try:
-        signal.signal(signal.SIGINT, partial(signal_handler, reset_server_port))
-        signal.signal(signal.SIGTERM, partial(signal_handler, reset_server_port))
+        signal.signal(signal.SIGINT, signal_handler)
+        signal.signal(signal.SIGTERM, signal_handler)
     except Exception:
         pass  # ignore "ValueError: signal only works in main thread"
 
