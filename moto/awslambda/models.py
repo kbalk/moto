@@ -374,7 +374,10 @@ class LambdaFunction(CloudFormationModel, DockerModel):
             self.region, ACCOUNT_ID, self.function_name
         )
 
-        self.tags = dict()
+        if spec.get("Tags"):
+            self.tags = spec.get("Tags")
+        else:
+            self.tags = dict()
 
     def set_version(self, version):
         self.function_arn = make_function_ver_arn(
@@ -948,8 +951,10 @@ class LambdaStorage(object):
     def get_arn(self, arn):
         return self._arns.get(arn, None)
 
-    def get_function_by_name_or_arn(self, input, qualifier=None):
-        return self.get_function_by_name(input, qualifier) or self.get_arn(input)
+    def get_function_by_name_or_arn(self, name_or_arn, qualifier=None):
+        return self.get_function_by_name(name_or_arn, qualifier) or self.get_arn(
+            name_or_arn
+        )
 
     def put_function(self, fn):
         """
@@ -1226,7 +1231,7 @@ class LambdaBackend(BaseBackend):
         if not esm:
             return False
 
-        for key, value in spec.items():
+        for key in spec.keys():
             if key == "FunctionName":
                 func = self._lambdas.get_function_by_name_or_arn(spec[key])
                 esm.function_arn = func.function_arn
