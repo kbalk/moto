@@ -1,5 +1,9 @@
-from typing import Any, Optional, Union
+from typing import Any, Optional, Union, TYPE_CHECKING
 from moto.core.exceptions import RESTError
+
+if TYPE_CHECKING:
+    from moto.s3.models import FakeDeleteMarker
+
 
 ERROR_WITH_BUCKET_NAME = """{% extends 'single_error' %}
 {% block extra %}<BucketName>{{ bucket }}</BucketName>{% endblock %}
@@ -559,3 +563,10 @@ class ObjectLockConfigurationNotFoundError(S3ClientError):
             "ObjectLockConfigurationNotFoundError",
             "Object Lock configuration does not exist for this bucket",
         )
+
+
+class HeadOnDeleteMarker(Exception):
+    """Marker to indicate that we've called `head_object()` on a FakeDeleteMarker"""
+
+    def __init__(self, marker: "FakeDeleteMarker"):
+        self.marker = marker

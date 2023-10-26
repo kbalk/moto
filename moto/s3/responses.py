@@ -5,14 +5,11 @@ from typing import Any, Dict, List, Iterator, Union, Tuple, Optional, Type
 import urllib.parse
 
 from moto import settings
-from moto.core.versions import is_werkzeug_2_3_x
 from moto.core.utils import (
     extract_region_from_aws_authorization,
     str_to_rfc_1123_datetime,
-    normalize_werkzeug_path,
 )
 from urllib.parse import parse_qs, urlparse, unquote, urlencode, urlunparse
-from urllib.parse import ParseResult
 
 import xmltodict
 
@@ -34,6 +31,7 @@ from .exceptions import (
     InvalidContentMD5,
     InvalidContinuationToken,
     S3ClientError,
+    HeadOnDeleteMarker,
     MissingBucket,
     MissingKey,
     MissingVersion,
@@ -163,14 +161,12 @@ class S3Response(BaseResponse):
         # Taking the naive approach to never decompress anything from S3 for now
         self.allow_request_decompression = False
 
-    def get_safe_path_from_url(self, url: ParseResult) -> str:
-        return self.get_safe_path(url.path)
+    def get_safe_path(self) -> str:
+        return unquote(self.raw_path)
 
-    def get_safe_path(self, part: str) -> str:
-        if self.is_werkzeug_request:
-            return normalize_werkzeug_path(part)
-        else:
-            return unquote(part)
+    @property
+    def is_access_point(self) -> bool:
+        return ".s3-accesspoint." in self.headers["host"]
 
     @property
     def backend(self) -> S3Backend:
@@ -246,10 +242,23 @@ class S3Response(BaseResponse):
         return "delete" in qs
 
     def parse_bucket_name_from_url(self, request: Any, url: str) -> str:
+        bucket_name = ""
         if self.subdomain_based_buckets(request):
-            return bucket_name_from_url(url)  # type: ignore
+            bucket_name = bucket_name_from_url(url)  # type: ignore
         else:
-            return bucketpath_bucket_name_from_url(url)  # type: ignore
+            bucket_name = bucketpath_bucket_name_from_url(url)  # type: ignore
+
+        if self.is_access_point:
+            # import here to avoid circular dependency error
+            from moto.s3control import s3control_backends
+
+            ap_name = bucket_name[: -(len(self.current_account) + 1)]
+            ap = s3control_backends[self.current_account]["global"].get_access_point(
+                self.current_account, ap_name
+            )
+            bucket_name = ap.bucket
+
+        return bucket_name
 
     def parse_key_name(self, request: Any, url: str) -> str:
         if self.subdomain_based_buckets(request):
@@ -955,7 +964,6 @@ class S3Response(BaseResponse):
             if self.body:
                 if self._create_bucket_configuration_is_empty(self.body):
                     raise MalformedXML()
-
                 try:
                     forced_region = xmltodict.parse(self.body)[
                         "CreateBucketConfiguration"
@@ -1136,10 +1144,6 @@ class S3Response(BaseResponse):
             objects = [objects]
         if len(objects) == 0:
             raise MalformedXML()
-        if self.is_werkzeug_request and is_werkzeug_2_3_x():
-            for obj in objects:
-                if "Key" in obj:
-                    obj["Key"] = self.get_safe_path(obj["Key"])
 
         if authenticated:
             deleted_objects = self.backend.delete_objects(bucket_name, objects)
@@ -1191,7 +1195,7 @@ class S3Response(BaseResponse):
 
         response_headers["content-range"] = f"bytes {begin}-{end}/{length}"
         content = response_content[begin : end + 1]
-        response_headers["content-length"] = len(content)
+        response_headers["content-length"] = str(len(content))
         return 206, response_headers, content
 
     def _handle_v4_chunk_signatures(self, body: bytes, content_length: int) -> bytes:
@@ -1256,7 +1260,7 @@ class S3Response(BaseResponse):
         self, request: Any, full_url: str, headers: Dict[str, Any]
     ) -> TYPE_RESPONSE:
         parsed_url = urlparse(full_url)
-        url_path = self.get_safe_path_from_url(parsed_url)
+        url_path = self.get_safe_path()
         query = parse_qs(parsed_url.query, keep_blank_values=True)
         method = request.method
 
@@ -1478,8 +1482,9 @@ class S3Response(BaseResponse):
                 if isinstance(copy_source, bytes):
                     copy_source = copy_source.decode("utf-8")
                 copy_source_parsed = urlparse(copy_source)
-                url_path = self.get_safe_path_from_url(copy_source_parsed)
-                src_bucket, src_key = url_path.lstrip("/").split("/", 1)
+                src_bucket, src_key = (
+                    unquote(copy_source_parsed.path).lstrip("/").split("/", 1)
+                )
                 src_version_id = parse_qs(copy_source_parsed.query).get(
                     "versionId", [None]  # type: ignore
                 )[0]
@@ -1500,11 +1505,11 @@ class S3Response(BaseResponse):
                         bucket_name,
                         upload_id,
                         part_number,
-                        src_bucket,
-                        src_key,
-                        src_version_id,
-                        start_byte,
-                        end_byte,
+                        src_bucket_name=src_bucket,
+                        src_key_name=src_key,
+                        src_version_id=src_version_id,
+                        start_byte=start_byte,
+                        end_byte=end_byte,
                     )
                 else:
                     return 404, response_headers, ""
@@ -1519,6 +1524,7 @@ class S3Response(BaseResponse):
                 )
                 response = ""
             response_headers.update(key.response_dict)
+            response_headers["content-length"] = str(len(response))
             return 200, response_headers, response
 
         storage_class = request.headers.get("x-amz-storage-class", "STANDARD")
@@ -1700,7 +1706,9 @@ class S3Response(BaseResponse):
 
             template = self.response_template(S3_OBJECT_COPY_RESPONSE)
             response_headers.update(new_key.response_dict)
-            return 200, response_headers, template.render(key=new_key)
+            response = template.render(key=new_key)
+            response_headers["content-length"] = str(len(response))
+            return 200, response_headers, response
 
         # Initial data
         new_key = self.backend.put_object(
@@ -1729,6 +1737,8 @@ class S3Response(BaseResponse):
         self.backend.set_key_tags(new_key, tagging)
 
         response_headers.update(new_key.response_dict)
+        # Remove content-length - the response body is empty for this request
+        response_headers.pop("content-length", None)
         return 200, response_headers, ""
 
     def _key_response_head(
@@ -1757,9 +1767,22 @@ class S3Response(BaseResponse):
         if_none_match = headers.get("If-None-Match", None)
         if_unmodified_since = headers.get("If-Unmodified-Since", None)
 
-        key = self.backend.head_object(
-            bucket_name, key_name, version_id=version_id, part_number=part_number
-        )
+        try:
+            key = self.backend.head_object(
+                bucket_name, key_name, version_id=version_id, part_number=part_number
+            )
+        except HeadOnDeleteMarker as exc:
+            headers = {
+                "x-amz-delete-marker": "true",
+                "x-amz-version-id": version_id,
+                "content-type": "application/xml",
+            }
+            if version_id:
+                headers["allow"] = "DELETE"
+                return 405, headers, "Method Not Allowed"
+            else:
+                headers["x-amz-version-id"] = exc.marker.version_id
+                return 404, headers, "Not Found"
         if key:
             response_headers.update(key.metadata)
             response_headers.update(key.response_dict)

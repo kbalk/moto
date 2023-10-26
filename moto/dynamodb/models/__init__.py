@@ -1,5 +1,4 @@
 import copy
-import json
 import re
 
 from collections import OrderedDict
@@ -26,7 +25,6 @@ from moto.dynamodb.exceptions import (
     TransactWriteSingleOpException,
 )
 from moto.dynamodb.models.dynamo_type import DynamoType, Item
-from moto.dynamodb.models.dynamo_type import serializer, deserializer
 from moto.dynamodb.models.table import (
     Table,
     RestoredTable,
@@ -387,6 +385,7 @@ class DynamoDBBackend(BaseBackend):
         attribute_updates: Optional[Dict[str, Any]] = None,
         expected: Optional[Dict[str, Any]] = None,
         condition_expression: Optional[str] = None,
+        return_values_on_condition_check_failure: Optional[str] = None,
     ) -> Item:
         table = self.get_table(table_name)
 
@@ -426,7 +425,13 @@ class DynamoDBBackend(BaseBackend):
             expression_attribute_values,
         )
         if not condition_op.expr(item):
-            raise ConditionalCheckFailed
+            if (
+                return_values_on_condition_check_failure == "ALL_OLD"
+                and item is not None
+            ):
+                raise ConditionalCheckFailed(item=item.to_json()["Attributes"])
+            else:
+                raise ConditionalCheckFailed
 
         # Update does not fail on new items, so create one
         if item is None:
@@ -540,6 +545,7 @@ class DynamoDBBackend(BaseBackend):
             Union[Tuple[str, str, Dict[str, Any]], Tuple[None, None, None]]
         ] = []  # [(Code, Message, Item), ..]
         for item in transact_items:
+            original_item: Optional[Dict[str, Any]] = None
             # check transact writes are not performing multiple operations
             # in the same item
             if len(list(item.keys())) > 1:
@@ -588,7 +594,7 @@ class DynamoDBBackend(BaseBackend):
                         return_values_on_condition_check_failure == "ALL_OLD"
                         and current
                     ):
-                        item["Item"] = current.to_json()["Attributes"]
+                        original_item = current.to_json()["Attributes"]
 
                     self.put_item(
                         table_name,
@@ -645,7 +651,7 @@ class DynamoDBBackend(BaseBackend):
                 self.tables = original_table_state
                 raise MultipleTransactionsException()
             except Exception as e:  # noqa: E722 Do not use bare except
-                errors.append((type(e).__name__, e.message, item))  # type: ignore[attr-defined]
+                errors.append((type(e).__name__, e.message, original_item))  # type: ignore
         if any([code is not None for code, _, _ in errors]):
             # Rollback to the original state, and reraise the errors
             self.tables = original_table_state
@@ -787,18 +793,11 @@ class DynamoDBBackend(BaseBackend):
         # Just pass all tables to PartiQL
         source_data: Dict[str, str] = dict()
         for table in self.tables.values():
-            source_data[table.name] = "\n".join(
-                [json.dumps(item.to_regular_json()) for item in table.all_items()]
-            )
+            source_data[table.name] = [  # type: ignore
+                item.to_json()["Attributes"] for item in table.all_items()
+            ]
 
-        # Parameters are in DynamoDB JSON form ({"S": "value"}) - we only want the value itself
-        parameters = [deserializer.deserialize(param) for param in parameters]
-
-        regular_json = partiql.query(statement, source_data, parameters)
-        return [
-            {key: serializer.serialize(value) for key, value in item.items()}
-            for item in regular_json
-        ]
+        return partiql.query(statement, source_data, parameters)
 
     def execute_transaction(
         self, statements: List[Dict[str, Any]]

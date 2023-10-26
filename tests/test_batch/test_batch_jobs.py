@@ -1,12 +1,13 @@
-from . import _get_clients, _setup
-
-import datetime
-from moto import mock_batch, mock_iam, mock_ec2, mock_ecs, mock_logs
 import botocore.exceptions
+import datetime
 import pytest
 import time
 from uuid import uuid4
 
+from moto import mock_batch, mock_iam, mock_ec2, mock_ecs, mock_logs
+from tests import DEFAULT_ACCOUNT_ID
+
+from . import _get_clients, _setup
 from ..markers import requires_docker
 
 
@@ -87,6 +88,52 @@ def test_submit_job_by_name():
 
 
 # SLOW TESTS
+
+
+@mock_ec2
+@mock_ecs
+@mock_iam
+@mock_batch
+@pytest.mark.network
+@requires_docker
+def test_submit_job_array_size():
+    # Setup
+    job_definition_name = f"sleep10_{str(uuid4())[0:6]}"
+    ec2_client, iam_client, _, _, batch_client = _get_clients()
+    commands = ["echo", "hello"]
+    _, _, _, iam_arn = _setup(ec2_client, iam_client)
+    _, queue_arn = prepare_job(batch_client, commands, iam_arn, job_definition_name)
+
+    # Execute
+    resp = batch_client.submit_job(
+        jobName="test1",
+        jobQueue=queue_arn,
+        jobDefinition=job_definition_name,
+        arrayProperties={"size": 2},
+    )
+
+    # Verify
+    job_id = resp["jobId"]
+    child_job_1_id = f"{job_id}:0"
+
+    job = batch_client.describe_jobs(jobs=[job_id])["jobs"][0]
+
+    assert job["arrayProperties"]["size"] == 2
+    assert job["attempts"] == []
+
+    _wait_for_job_status(batch_client, job_id, "SUCCEEDED")
+
+    job = batch_client.describe_jobs(jobs=[job_id])["jobs"][0]
+    # If the main job is successful, that means that all child jobs are successful
+    assert job["arrayProperties"]["size"] == 2
+    assert job["arrayProperties"]["statusSummary"]["SUCCEEDED"] == 2
+    # Main job still has no attempts - because only the child jobs are executed
+    assert job["attempts"] == []
+
+    child_job_1 = batch_client.describe_jobs(jobs=[child_job_1_id])["jobs"][0]
+    assert child_job_1["status"] == "SUCCEEDED"
+    # Child job was executed
+    assert len(child_job_1["attempts"]) == 1
 
 
 @mock_logs
@@ -980,13 +1027,19 @@ def test_submit_job_with_timeout():
     commands = ["sleep", "30"]
     job_def_arn, queue_arn = prepare_job(batch_client, commands, iam_arn, job_def_name)
 
+    job_name = str(uuid4())[0:6]
     resp = batch_client.submit_job(
-        jobName=str(uuid4())[0:6],
+        jobName=job_name,
         jobQueue=queue_arn,
         jobDefinition=job_def_arn,
         timeout={"attemptDurationSeconds": 1},
     )
     job_id = resp["jobId"]
+    assert resp["jobName"] == job_name
+    assert (
+        resp["jobArn"]
+        == f"arn:aws:batch:eu-central-1:{DEFAULT_ACCOUNT_ID}:job/{job_id}"
+    )
 
     # This should fail, as the job-duration is longer than the attemptDurationSeconds
     _wait_for_job_status(batch_client, job_id, "FAILED")

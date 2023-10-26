@@ -2272,6 +2272,7 @@
 - [X] disable_ebs_encryption_by_default
 - [ ] disable_fast_launch
 - [ ] disable_fast_snapshot_restores
+- [ ] disable_image
 - [ ] disable_image_block_public_access
 - [ ] disable_image_deprecation
 - [ ] disable_ipam_organization_admin_account
@@ -2299,6 +2300,7 @@
 - [X] enable_ebs_encryption_by_default
 - [ ] enable_fast_launch
 - [ ] enable_fast_snapshot_restores
+- [ ] enable_image
 - [ ] enable_image_block_public_access
 - [ ] enable_image_deprecation
 - [ ] enable_ipam_organization_admin_account
@@ -2508,12 +2510,12 @@
 
 ## ecr
 <details>
-<summary>63% implemented</summary>
+<summary>68% implemented</summary>
 
 - [ ] batch_check_layer_availability
 - [X] batch_delete_image
 - [X] batch_get_image
-- [ ] batch_get_repository_scanning_configuration
+- [X] batch_get_repository_scanning_configuration
 - [ ] complete_layer_upload
 - [ ] create_pull_through_cache_rule
 - [X] create_repository
@@ -2543,7 +2545,7 @@
 - [X] put_image_tag_mutability
 - [X] put_lifecycle_policy
 - [X] put_registry_policy
-- [ ] put_registry_scanning_configuration
+- [X] put_registry_scanning_configuration
 - [X] put_replication_configuration
 - [X] set_repository_policy
 - [X] start_image_scan
@@ -3836,6 +3838,58 @@
 - [ ] update_user
 </details>
 
+## inspector2
+<details>
+<summary>41% implemented</summary>
+
+- [X] associate_member
+- [X] batch_get_account_status
+- [ ] batch_get_code_snippet
+- [ ] batch_get_finding_details
+- [ ] batch_get_free_trial_info
+- [ ] batch_get_member_ec2_deep_inspection_status
+- [ ] batch_update_member_ec2_deep_inspection_status
+- [ ] cancel_findings_report
+- [ ] cancel_sbom_export
+- [X] create_filter
+- [ ] create_findings_report
+- [ ] create_sbom_export
+- [X] delete_filter
+- [X] describe_organization_configuration
+- [X] disable
+- [X] disable_delegated_admin_account
+- [X] disassociate_member
+- [X] enable
+- [X] enable_delegated_admin_account
+- [ ] get_configuration
+- [ ] get_delegated_admin_account
+- [ ] get_ec2_deep_inspection_configuration
+- [ ] get_encryption_key
+- [ ] get_findings_report_status
+- [X] get_member
+- [ ] get_sbom_export
+- [ ] list_account_permissions
+- [ ] list_coverage
+- [ ] list_coverage_statistics
+- [X] list_delegated_admin_accounts
+- [X] list_filters
+- [ ] list_finding_aggregations
+- [X] list_findings
+- [X] list_members
+- [X] list_tags_for_resource
+- [ ] list_usage_totals
+- [ ] reset_encryption_key
+- [ ] search_vulnerabilities
+- [X] tag_resource
+- [X] untag_resource
+- [ ] update_configuration
+- [ ] update_ec2_deep_inspection_configuration
+- [ ] update_encryption_key
+- [ ] update_filter
+- [ ] update_org_ec2_deep_inspection_configuration
+- [X] update_organization_configuration
+</details>
+
 ## iot
 <details>
 <summary>32% implemented</summary>
@@ -4105,6 +4159,42 @@
 - [X] update_thing_shadow
 </details>
 
+## ivs
+<details>
+<summary>20% implemented</summary>
+
+- [X] batch_get_channel
+- [ ] batch_get_stream_key
+- [ ] batch_start_viewer_session_revocation
+- [X] create_channel
+- [ ] create_recording_configuration
+- [ ] create_stream_key
+- [X] delete_channel
+- [ ] delete_playback_key_pair
+- [ ] delete_recording_configuration
+- [ ] delete_stream_key
+- [X] get_channel
+- [ ] get_playback_key_pair
+- [ ] get_recording_configuration
+- [ ] get_stream
+- [ ] get_stream_key
+- [ ] get_stream_session
+- [ ] import_playback_key_pair
+- [X] list_channels
+- [ ] list_playback_key_pairs
+- [ ] list_recording_configurations
+- [ ] list_stream_keys
+- [ ] list_stream_sessions
+- [ ] list_streams
+- [ ] list_tags_for_resource
+- [ ] put_metadata
+- [ ] start_viewer_session_revocation
+- [ ] stop_stream
+- [ ] tag_resource
+- [ ] untag_resource
+- [X] update_channel
+</details>
+
 ## kinesis
 <details>
 <summary>93% implemented</summary>
@@ -4246,17 +4336,19 @@
 
 ## lakeformation
 <details>
-<summary>34% implemented</summary>
+<summary>40% implemented</summary>
 
-- [ ] add_lf_tags_to_resource
+- [X] add_lf_tags_to_resource
 - [ ] assume_decorated_role_with_saml
 - [X] batch_grant_permissions
 - [X] batch_revoke_permissions
 - [ ] cancel_transaction
 - [ ] commit_transaction
 - [ ] create_data_cells_filter
+- [ ] create_lake_formation_opt_in
 - [X] create_lf_tag
 - [ ] delete_data_cells_filter
+- [ ] delete_lake_formation_opt_in
 - [X] delete_lf_tag
 - [ ] delete_objects_on_cancel
 - [X] deregister_resource
@@ -4269,7 +4361,7 @@
 - [X] get_lf_tag
 - [ ] get_query_state
 - [ ] get_query_statistics
-- [ ] get_resource_lf_tags
+- [X] get_resource_lf_tags
 - [ ] get_table_objects
 - [ ] get_temporary_glue_partition_credentials
 - [ ] get_temporary_glue_table_credentials
@@ -4277,6 +4369,7 @@
 - [ ] get_work_units
 - [X] grant_permissions
 - [X] list_data_cells_filter
+- [ ] list_lake_formation_opt_ins
 - [X] list_lf_tags
 - [X] list_permissions
 - [X] list_resources
@@ -4284,14 +4377,14 @@
 - [ ] list_transactions
 - [X] put_data_lake_settings
 - [X] register_resource
-- [ ] remove_lf_tags_from_resource
+- [X] remove_lf_tags_from_resource
 - [X] revoke_permissions
 - [ ] search_databases_by_lf_tags
 - [ ] search_tables_by_lf_tags
 - [ ] start_query_planning
 - [ ] start_transaction
 - [ ] update_data_cells_filter
-- [ ] update_lf_tag
+- [X] update_lf_tag
 - [ ] update_resource
 - [ ] update_table_objects
 - [ ] update_table_storage_optimizer
@@ -6197,7 +6290,7 @@
 
 ## sagemaker
 <details>
-<summary>19% implemented</summary>
+<summary>20% implemented</summary>
 
 - [ ] add_association
 - [X] add_tags
@@ -6341,7 +6434,7 @@
 - [ ] describe_model_card_export_job
 - [ ] describe_model_explainability_job_definition
 - [X] describe_model_package
-- [ ] describe_model_package_group
+- [X] describe_model_package_group
 - [ ] describe_model_quality_job_definition
 - [ ] describe_monitoring_schedule
 - [ ] describe_notebook_instance
@@ -6413,7 +6506,7 @@
 - [ ] list_model_cards
 - [ ] list_model_explainability_job_definitions
 - [ ] list_model_metadata
-- [ ] list_model_package_groups
+- [X] list_model_package_groups
 - [X] list_model_packages
 - [ ] list_model_quality_job_definitions
 - [X] list_models
@@ -6488,7 +6581,7 @@
 - [ ] update_image_version
 - [ ] update_inference_experiment
 - [ ] update_model_card
-- [ ] update_model_package
+- [X] update_model_package
 - [ ] update_monitoring_alert
 - [ ] update_monitoring_schedule
 - [ ] update_notebook_instance
@@ -6636,7 +6729,7 @@
 
 ## ses
 <details>
-<summary>39% implemented</summary>
+<summary>40% implemented</summary>
 
 - [ ] clone_receipt_rule_set
 - [X] create_configuration_set
@@ -6656,7 +6749,7 @@
 - [ ] delete_receipt_filter
 - [ ] delete_receipt_rule
 - [ ] delete_receipt_rule_set
-- [ ] delete_template
+- [X] delete_template
 - [ ] delete_verified_email_address
 - [ ] describe_active_receipt_rule_set
 - [X] describe_configuration_set
@@ -7219,21 +7312,33 @@
 
 ## textract
 <details>
-<summary>15% implemented</summary>
+<summary>8% implemented</summary>
 
 - [ ] analyze_document
 - [ ] analyze_expense
 - [ ] analyze_id
+- [ ] create_adapter
+- [ ] create_adapter_version
+- [ ] delete_adapter
+- [ ] delete_adapter_version
 - [ ] detect_document_text
+- [ ] get_adapter
+- [ ] get_adapter_version
 - [ ] get_document_analysis
 - [X] get_document_text_detection
 - [ ] get_expense_analysis
 - [ ] get_lending_analysis
 - [ ] get_lending_analysis_summary
+- [ ] list_adapter_versions
+- [ ] list_adapters
+- [ ] list_tags_for_resource
 - [ ] start_document_analysis
 - [X] start_document_text_detection
 - [ ] start_expense_analysis
 - [ ] start_lending_analysis
+- [ ] tag_resource
+- [ ] untag_resource
+- [ ] update_adapter
 </details>
 
 ## timestream-write
@@ -7389,6 +7494,8 @@
 - backup
 - backup-gateway
 - backupstorage
+- bedrock
+- bedrock-runtime
 - billingconductor
 - braket
 - chime
@@ -7427,6 +7534,7 @@
 - cur
 - customer-profiles
 - dataexchange
+- datazone
 - detective
 - devicefarm
 - devops-guru
@@ -7459,7 +7567,6 @@
 - imagebuilder
 - importexport
 - inspector
-- inspector2
 - internetmonitor
 - iot-jobs-data
 - iot-roborunner
@@ -7476,7 +7583,6 @@
 - iotthingsgraph
 - iottwinmaker
 - iotwireless
-- ivs
 - ivs-realtime
 - ivschat
 - kafka

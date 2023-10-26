@@ -7,11 +7,17 @@ import boto3
 from botocore.client import ClientError
 import pytest
 import requests
+from unittest import SkipTest
 
 from moto import settings, mock_s3
 import moto.s3.models as s3model
 from moto.s3.responses import DEFAULT_REGION_NAME
-from moto.settings import get_s3_default_key_buffer_size, S3_UPLOAD_PART_MIN_SIZE
+from moto.settings import (
+    get_s3_default_key_buffer_size,
+    S3_UPLOAD_PART_MIN_SIZE,
+    test_proxy_mode,
+)
+from .test_s3 import add_proxy_details
 
 if settings.TEST_DECORATOR_MODE:
     REDUCED_PART_SIZE = 256
@@ -977,7 +983,10 @@ def test_generate_presigned_url_on_multipart_upload_without_acl():
     url = client.generate_presigned_url(
         "head_object", Params={"Bucket": bucket_name, "Key": object_key}
     )
-    res = requests.get(url)
+    kwargs = {}
+    if test_proxy_mode():
+        add_proxy_details(kwargs)
+    res = requests.get(url, **kwargs)
     assert res.status_code == 200
 
 
@@ -1019,3 +1028,34 @@ def test_head_object_returns_part_count():
     # Header is not returned when we do not pass PartNumber
     resp = client.head_object(Bucket=bucket, Key=key)
     assert "PartsCount" not in resp
+
+
+@mock_s3
+@reduced_min_part_size
+def test_generate_presigned_url_for_multipart_upload():
+    if not settings.TEST_DECORATOR_MODE:
+        raise SkipTest("No point in testing this outside decorator mode")
+    bucket_name = "mock-bucket"
+    file_name = "mock-file"
+    s3_client = boto3.client("s3")
+    s3_client.create_bucket(Bucket=bucket_name)
+
+    mpu = s3_client.create_multipart_upload(
+        Bucket=bucket_name,
+        Key=file_name,
+    )
+    upload_id = mpu["UploadId"]
+
+    url = s3_client.generate_presigned_url(
+        "upload_part",
+        Params={
+            "Bucket": bucket_name,
+            "Key": file_name,
+            "PartNumber": 1,
+            "UploadId": upload_id,
+        },
+    )
+    data = b"0" * REDUCED_PART_SIZE
+
+    resp = requests.put(url, data=data)
+    assert resp.status_code == 200

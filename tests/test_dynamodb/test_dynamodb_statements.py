@@ -1,69 +1,91 @@
 import boto3
+import pytest
 
 from moto import mock_dynamodb
 from unittest import TestCase
 
+from . import dynamodb_aws_verified
 
-class TestSelectStatements:
-    mock = mock_dynamodb()
 
-    @classmethod
-    def setup_class(cls):
-        cls.mock.start()
-        cls.client = boto3.client("dynamodb", "us-east-1")
-        cls.client.create_table(
-            TableName="messages",
-            KeySchema=[{"AttributeName": "id", "KeyType": "HASH"}],
-            AttributeDefinitions=[{"AttributeName": "id", "AttributeType": "S"}],
-            ProvisionedThroughput={"ReadCapacityUnits": 1, "WriteCapacityUnits": 5},
-        )
-        cls.item1 = {"id": {"S": "msg1"}, "body": {"S": "some text"}}
-        cls.item2 = {"id": {"S": "msg2"}, "body": {"S": "n/a"}, "unique": {"S": "key"}}
-        cls.client.put_item(TableName="messages", Item=cls.item1)
-        cls.client.put_item(TableName="messages", Item=cls.item2)
+item1 = {
+    "pk": {"S": "msg1"},
+    "body": {"S": "some text"},
+    "nested_attrs": {"M": {"some": {"S": "key"}}},
+    "price": {"N": "123.4"},
+    "list_attrs": {"L": [{"BOOL": True}, {"BOOL": False}]},
+    "bool_attr": {"BOOL": True},
+}
+item2 = {"pk": {"S": "msg2"}, "body": {"S": "n/a"}, "unique_key": {"S": "key"}}
 
-    @classmethod
-    def teardown_class(cls):
-        try:
-            cls.mock.stop()
-        except RuntimeError:
-            pass
 
-    def test_execute_statement_select_star(self):
-        items = TestSelectStatements.client.execute_statement(
-            Statement="select * from messages"
-        )["Items"]
-        assert TestSelectStatements.item1 in items
-        assert TestSelectStatements.item2 in items
+def create_items(table_name):
+    client = boto3.client("dynamodb", "us-east-1")
+    client.put_item(TableName=table_name, Item=item1)
+    client.put_item(TableName=table_name, Item=item2)
 
-    def test_execute_statement_select_unique(self):
-        items = TestSelectStatements.client.execute_statement(
-            Statement="select unique from messages"
-        )["Items"]
-        assert {} in items
-        assert {"unique": {"S": "key"}} in items
 
-    def test_execute_statement_with_parameter(self):
-        stmt = "select * from messages where id = ?"
-        items = TestSelectStatements.client.execute_statement(
-            Statement=stmt, Parameters=[{"S": "msg1"}]
-        )["Items"]
-        assert len(items) == 1
-        assert TestSelectStatements.item1 in items
+@pytest.mark.aws_verified
+@dynamodb_aws_verified
+def test_execute_statement_select_star(table_name=None):
+    client = boto3.client("dynamodb", "us-east-1")
+    create_items(table_name)
+    items = client.execute_statement(Statement=f"select * from {table_name}")["Items"]
+    assert item1 in items
+    assert item2 in items
 
-        stmt = "select id from messages where id = ?"
-        items = TestSelectStatements.client.execute_statement(
-            Statement=stmt, Parameters=[{"S": "msg1"}]
-        )["Items"]
-        assert len(items) == 1
-        assert {"id": {"S": "msg1"}} in items
 
-    def test_execute_statement_with_no_results(self):
-        stmt = "select * from messages where id = ?"
-        items = TestSelectStatements.client.execute_statement(
-            Statement=stmt, Parameters=[{"S": "msg3"}]
-        )["Items"]
-        assert items == []
+@pytest.mark.aws_verified
+@dynamodb_aws_verified
+def test_execute_statement_select_attr(table_name=None):
+    client = boto3.client("dynamodb", "us-east-1")
+    create_items(table_name)
+    items = client.execute_statement(Statement=f"select unique_key from {table_name}")[
+        "Items"
+    ]
+    assert {} in items
+    assert {"unique_key": {"S": "key"}} in items
+
+
+@pytest.mark.aws_verified
+@dynamodb_aws_verified
+def test_execute_statement_with_quoted_table(table_name=None):
+    client = boto3.client("dynamodb", "us-east-1")
+    create_items(table_name)
+    items = client.execute_statement(Statement=f'select * from "{table_name}"')["Items"]
+    assert item1 in items
+    assert item2 in items
+
+
+@pytest.mark.aws_verified
+@dynamodb_aws_verified
+def test_execute_statement_with_parameter(table_name=None):
+    client = boto3.client("dynamodb", "us-east-1")
+    create_items(table_name)
+    stmt = f"select * from {table_name} where pk = ?"
+    items = client.execute_statement(Statement=stmt, Parameters=[{"S": "msg1"}])[
+        "Items"
+    ]
+    assert len(items) == 1
+    assert item1 in items
+
+    stmt = f"select pk from {table_name} where pk = ?"
+    items = client.execute_statement(Statement=stmt, Parameters=[{"S": "msg1"}])[
+        "Items"
+    ]
+    assert len(items) == 1
+    assert {"pk": {"S": "msg1"}} in items
+
+
+@pytest.mark.aws_verified
+@dynamodb_aws_verified
+def test_execute_statement_with_no_results(table_name=None):
+    client = boto3.client("dynamodb", "us-east-1")
+    create_items(table_name)
+    stmt = f"select * from {table_name} where pk = ?"
+    items = client.execute_statement(Statement=stmt, Parameters=[{"S": "msg3"}])[
+        "Items"
+    ]
+    assert items == []
 
 
 @mock_dynamodb
@@ -176,3 +198,65 @@ class TestBatchExecuteStatement(TestCase):
             "TableName": "table1",
         } in items
         assert {"TableName": "table2", "Item": self.item1} in items
+
+
+@pytest.mark.aws_verified
+@dynamodb_aws_verified
+def test_execute_statement_with_all_clauses(table_name=None):
+    dynamodb_client = boto3.client("dynamodb", "us-east-1")
+
+    items = [
+        {
+            "pk": {"S": "0"},
+            "Name": {"S": "Lambda"},
+            "NameLower": {"S": "lambda"},
+            "Description": {"S": "Run code in under 15 minutes"},
+            "DescriptionLower": {"S": "run code in under 15 minutes"},
+            "Price": {"N": "2E-7"},
+            "Unit": {"S": "invocation"},
+            "Category": {"S": "free"},
+            "FreeTier": {"N": "1E+6"},
+        },
+        {
+            "pk": {"S": "1"},
+            "Name": {"S": "Auto Scaling"},
+            "NameLower": {"S": "auto scaling"},
+            "Description": {
+                "S": "Automatically scale the number of EC2 instances with demand",
+            },
+            "DescriptionLower": {
+                "S": "automatically scale the number of ec2 instances with demand"
+            },
+            "Price": {"N": "0"},
+            "Unit": {"S": "group"},
+            "Category": {"S": "free"},
+            "FreeTier": {"NULL": True},
+        },
+        {
+            "pk": {"S": "2"},
+            "Name": {"S": "EC2"},
+            "NameLower": {"S": "ec2"},
+            "Description": {"S": "Servers in the cloud"},
+            "DescriptionLower": {"S": "servers in the cloud"},
+            "Price": {"N": "7.2"},
+            "Unit": {"S": "instance"},
+            "Category": {"S": "trial"},
+        },
+        {
+            "pk": {"S": "3"},
+            "Name": {"S": "Config"},
+            "NameLower": {"S": "config"},
+            "Description": {"S": "Audit the configuration of AWS resources"},
+            "DescriptionLower": {"S": "audit the configuration of aws resources"},
+            "Price": {"N": "0.003"},
+            "Unit": {"S": "configuration item"},
+            "Category": {"S": "paid"},
+        },
+    ]
+
+    for item in items:
+        dynamodb_client.put_item(TableName=table_name, Item=item)
+
+    partiql_statement = f"SELECT pk FROM \"{table_name}\" WHERE (contains(\"NameLower\", 'code') OR contains(\"DescriptionLower\", 'code')) AND Category = 'free' AND Price >= 0 AND Price <= 1 AND FreeTier IS NOT MISSING AND attribute_type(\"FreeTier\", 'N')"
+    items = dynamodb_client.execute_statement(Statement=partiql_statement)["Items"]
+    assert items == [{"pk": {"S": "0"}}]

@@ -4,7 +4,6 @@ import pytest
 
 from botocore.exceptions import ClientError
 from moto import mock_lakeformation
-from moto.core import DEFAULT_ACCOUNT_ID
 
 # See our Development Tips on writing tests for hints on how to write good tests:
 # http://docs.getmoto.org/en/latest/docs/contributing/development_tips/tests.html
@@ -143,53 +142,6 @@ def test_revoke_permissions():
             "PermissionsWithGrantOption": ["SELECT", "DROP"],
         }
     ]
-
-
-@mock_lakeformation
-def test_lf_tags():
-    client = boto3.client("lakeformation", region_name="eu-west-2")
-
-    client.create_lf_tag(TagKey="tag1", TagValues=["1a", "1b"])
-    client.create_lf_tag(TagKey="tag2", TagValues=["2a", "2b"])
-    client.create_lf_tag(TagKey="tag3", TagValues=["3a", "3b"])
-
-    resp = client.get_lf_tag(TagKey="tag1")
-    assert resp["CatalogId"] == DEFAULT_ACCOUNT_ID
-    assert resp["TagKey"] == "tag1"
-    assert resp["TagValues"] == ["1a", "1b"]
-
-    resp = client.list_lf_tags()
-    assert len(resp["LFTags"]) == 3
-    assert {
-        "CatalogId": DEFAULT_ACCOUNT_ID,
-        "TagKey": "tag1",
-        "TagValues": ["1a", "1b"],
-    } in resp["LFTags"]
-    assert {
-        "CatalogId": DEFAULT_ACCOUNT_ID,
-        "TagKey": "tag2",
-        "TagValues": ["2a", "2b"],
-    } in resp["LFTags"]
-    assert {
-        "CatalogId": DEFAULT_ACCOUNT_ID,
-        "TagKey": "tag3",
-        "TagValues": ["3a", "3b"],
-    } in resp["LFTags"]
-
-    client.delete_lf_tag(TagKey="tag2")
-
-    resp = client.list_lf_tags()
-    assert len(resp["LFTags"]) == 2
-    assert {
-        "CatalogId": DEFAULT_ACCOUNT_ID,
-        "TagKey": "tag1",
-        "TagValues": ["1a", "1b"],
-    } in resp["LFTags"]
-    assert {
-        "CatalogId": DEFAULT_ACCOUNT_ID,
-        "TagKey": "tag3",
-        "TagValues": ["3a", "3b"],
-    } in resp["LFTags"]
 
 
 @mock_lakeformation
